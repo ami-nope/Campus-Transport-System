@@ -4,13 +4,21 @@ import os
 from werkzeug.security import generate_password_hash, check_password_hash
 import base64
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 app = Flask(__name__)
 app.config['WTF_CSRF_ENABLED'] = False
 app.secret_key = os.environ.get('FLASK_SECRET', 'dev-secret-change-this')
+# Harden session cookies for hosted environments
+if os.environ.get('RENDER') or os.environ.get('RENDER_EXTERNAL_URL'):
+    app.config.update(
+        SESSION_COOKIE_SAMESITE='Lax',
+        SESSION_COOKIE_SECURE=True
+    )
 
-BUSES_FILE = 'buses_location.json'
-LOCATIONS_FILE = 'locations.json'
-CREDENTIALS_FILE = 'credentials.json'
+BUSES_FILE = os.path.join(BASE_DIR, 'buses_location.json')
+LOCATIONS_FILE = os.path.join(BASE_DIR, 'locations.json')
+CREDENTIALS_FILE = os.path.join(BASE_DIR, 'credentials.json')
 
 # Ensure required files exist
 if not os.path.exists(BUSES_FILE):

@@ -59,6 +59,8 @@
             #startBtn, #stopBtn, #startDriveBtn, #stopDriveBtn { width: 100%; display:block }
             .progress-outer { height: 14px }
         }
+        /* Thinner ETA text styling */
+        #etaDisplay { font-weight: 400; color: #34d399; }
     </style>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
@@ -97,7 +99,7 @@
         <div class="card" style="margin-top:12px;">
             <h3>🗺️ Driver Map & ETA</h3>
             <div id="driverMap"></div>
-            <p style="color:#9aa4b2;margin-top:8px">ETA to next stop: <strong id="etaDisplay">—</strong></p>
+            <p style="color:#9aa4b2;margin-top:8px">ETA to next stop: <span id="etaDisplay">—</span></p>
             <p style="color:#9aa4b2;margin-top:6px">Progress: <strong id="progressPercent">—</strong></p>
             <div class="progress-outer"><div id="progressFill" class="progress-fill"></div></div>
             <p style="color:#9aa4b2;margin-top:6px">Next stop: <strong id="nextStopDisplay">—</strong></p>

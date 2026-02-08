@@ -84,7 +84,7 @@
                 </h3>
                 <div class="stats-grid">
                     <div class="stat-box">
-                        <div class="stat-number" id="busCount">0</div>
+                        <div class="stat-number" id="activeBusCount">0</div>
                         <div class="stat-label">Active Buses</div>
                     </div>
                     <div class="stat-box">
@@ -149,7 +149,7 @@
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px">
                     <div style="text-align:center">
                         <div style="font-size:12px; color:#9aa4b2">ETA</div>
-                        <div id="etaValue" style="font-size:18px; font-weight:600; color:#34d399; margin-top:4px">--</div>
+                        <div id="etaValue" style="font-size:18px; font-weight:400; color:#34d399; margin-top:4px">--</div>
                     </div>
                     <div style="text-align:center">
                         <div style="font-size:12px; color:#9aa4b2">Walk Distance</div>
@@ -157,7 +157,7 @@
                     </div>
                 </div>
                 <div id="busesOnRoute" style="margin-top:12px; font-size:12px; color:#9aa4b2">
-                    <span>🚌 Buses on route: <span id="busCount">-</span></span>
+                    <span>🚌 Buses on route: <span id="busesOnRouteCount">-</span></span>
                 </div>
             </div>
 
@@ -454,6 +454,30 @@
             return null;
         }
 
+        // Fast OSRM durations for many buses to one stop using Table API
+        async function getOSRMMinDurationToStop(busPoints, stopPoint) {
+            try {
+                if (!busPoints || busPoints.length === 0 || !stopPoint) return null;
+                const points = [...busPoints, stopPoint];
+                const destIndex = points.length - 1;
+                const coords = points.map(p => `${p[1]},${p[0]}`).join(';');
+                const sources = busPoints.map((_, i) => i).join(';');
+                const url = `https://router.project-osrm.org/table/v1/driving/${coords}?sources=${sources}&destinations=${destIndex}`;
+                const res = await fetch(url);
+                const data = await res.json();
+                if (data && data.durations && Array.isArray(data.durations)) {
+                    // durations is [ [toDest], [toDest], ... ] since only one destination
+                    const mins = data.durations
+                        .map(row => row && row.length ? row[0] : Infinity)
+                        .reduce((a, b) => Math.min(a, b), Infinity);
+                    return isFinite(mins) ? mins : null;
+                }
+            } catch (e) {
+                console.error('OSRM table error:', e);
+            }
+            return null;
+        }
+
         function renderRoutesList(routes) {
             const container = document.getElementById('routesContainer');
             if (routes.length === 0) {
@@ -515,21 +539,27 @@
             const card = document.getElementById('routeDetailsCard');
             card.style.display = 'block';
 
-            // Find buses on this route
-            const busesOnRoute = Object.entries(busRouteMap)
-                .filter(([bus, routeId]) => routeId === route.id)
-                .map(([bus]) => bus);
+            // Fetch buses and find those on this route
+            const busesData = await fetch('/api/buses').then(r => r.json()).catch(() => ({}));
+            const busesOnRoute = Object.entries(busesData)
+                .filter(([busNum, b]) => b && b.routeId === route.id)
+                .map(([busNum]) => busNum);
 
-            document.getElementById('busCount').textContent = busesOnRoute.length;
+            const borEl = document.getElementById('busesOnRouteCount');
+            if (borEl) borEl.textContent = busesOnRoute.length;
 
             let nearestStop = null;
             let nearestStopIndex = 0;
             let minDist = Infinity;
 
-            if (userLocation && route.waypoints.length > 0) {
+            const refLocation = (userLocation && userLocation.length === 2)
+                ? userLocation
+                : (map ? [map.getCenter().lat, map.getCenter().lng] : null);
+
+            if (refLocation && route.waypoints.length > 0) {
                 // Find nearest bus stop
                 route.waypoints.forEach((stop, idx) => {
-                    const dist = calcDistance(userLocation[0], userLocation[1], stop[0], stop[1]);
+                    const dist = calcDistance(refLocation[0], refLocation[1], stop[0], stop[1]);
                     if (dist < minDist) {
                         minDist = dist;
                         nearestStop = stop;
@@ -538,42 +568,47 @@
                 });
 
                 if (nearestStop) {
-                    // Show walking distance
-                    const distKm = (minDist / 1000).toFixed(2);
-                    const walkMin = Math.ceil(minDist / 1.4); // ~1.4 m/s walking speed
-                    document.getElementById('walkDistance').textContent = `${distKm} km (${walkMin}m)`;
+                    // Show walking distance only if user location is available
+                    if (userLocation) {
+                        const distKm = (minDist / 1000).toFixed(2);
+                        const walkMin = Math.ceil(minDist / 1.4); // ~1.4 m/s walking speed
+                        document.getElementById('walkDistance').textContent = `${distKm} km (${walkMin}m)`;
 
-                    // Draw walking line
-                    if (walkingLine) map.removeLayer(walkingLine);
-                    walkingLine = L.polyline([userLocation, nearestStop], {
-                        color: '#999999',
-                        weight: 2,
-                        opacity: 0.6,
-                        dashArray: '5, 5'
-                    }).addTo(map);
+                        // Draw walking line
+                        if (walkingLine) map.removeLayer(walkingLine);
+                        walkingLine = L.polyline([userLocation, nearestStop], {
+                            color: '#999999',
+                            weight: 2,
+                            opacity: 0.6,
+                            dashArray: '5, 5'
+                        }).addTo(map);
+                    } else {
+                        document.getElementById('walkDistance').textContent = '--';
+                    }
                 }
             } else {
                 document.getElementById('walkDistance').textContent = '--';
             }
 
-            // Compute ETA using OSRM from each bus on route to the nearest stop
+            // Compute ETA using OSRM (fast table API) from buses on route to nearest stop
             let etaText = '--';
             if (busesOnRoute.length > 0 && nearestStop) {
                 try {
-                    const busesData = await fetch('/api/buses').then(r => r.json()).catch(() => ({}));
-                    let minDuration = Infinity;
+                    const busPoints = busesOnRoute
+                        .map(busNum => busesData[busNum])
+                        .filter(b => b && typeof b.lat === 'number' && typeof b.lng === 'number')
+                        .map(b => [b.lat, b.lng]);
 
-                    for (const busNum of busesOnRoute) {
-                        const b = busesData[busNum];
-                        if (!b || !b.lat || !b.lng) continue;
-                        const durationObj = await getOSRMDuration([b.lat, b.lng], nearestStop);
-                        if (durationObj && typeof durationObj.duration === 'number') {
-                            if (durationObj.duration < minDuration) minDuration = durationObj.duration;
-                        }
+                    let minDurationSec = await getOSRMMinDurationToStop(busPoints, nearestStop);
+                    if (minDurationSec == null) {
+                        // Fallback: single route call for first bus
+                        const first = busPoints[0];
+                        const d = await getOSRMDuration(first, nearestStop);
+                        minDurationSec = d && d.duration ? d.duration : null;
                     }
 
-                    if (minDuration !== Infinity) {
-                        const mins = Math.ceil(minDuration / 60);
+                    if (minDurationSec != null) {
+                        const mins = Math.ceil(minDurationSec / 60);
                         etaText = `${mins}m`;
                     } else {
                         // fallback to route length estimate
@@ -677,7 +712,8 @@
                 .then(response => response.json())
                 .then(buses => {
                     const busNumbers = Object.keys(buses);
-                    document.getElementById('busCount').textContent = busNumbers.length;
+                    const activeCountEl = document.getElementById('activeBusCount');
+                    if (activeCountEl) activeCountEl.textContent = busNumbers.length;
 
                     const existingBuses = Object.keys(busMarkers);
                     existingBuses.forEach(busNum => {
