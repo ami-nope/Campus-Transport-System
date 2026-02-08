@@ -8,22 +8,23 @@
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: #0b0c10;
-            color: #e6eef8;
-            min-height: 100vh;
-            padding: 18px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+        .container { 
+            width: 100%; 
+            max-width: 420px; 
+            margin: 0 auto; 
+            background: rgba(15,23,36,0.28); 
+            border-radius: 14px; 
+            padding: 18px; 
+            box-shadow: 0 12px 32px rgba(2,6,23,0.55), inset 0 1px 0 rgba(255,255,255,0.06); 
+            border: 1px solid rgba(255,255,255,0.10); 
+            backdrop-filter: blur(12px) saturate(125%); 
         }
-        .container {
-            width: 100%;
-            max-width: 420px;
             margin: 0 auto;
             background: #0f1724;
             border-radius: 12px;
             padding: 18px;
             box-shadow: 0 6px 24px rgba(2,6,23,0.7);
-            border: 1px solid rgba(255,255,255,0.03);
+        .status-card { background: linear-gradient(135deg, rgba(28,46,78,0.24), rgba(28,46,78,0.06)); padding: 12px; border-radius: 12px; margin-bottom: 12px; border:1px solid rgba(255,255,255,0.10); backdrop-filter: blur(10px) saturate(120%); box-shadow: 0 8px 24px rgba(2,6,23,0.45), inset 0 1px 0 rgba(255,255,255,0.06); }
         }
         h1 { font-size: 20px; color: #dbeafe; text-align: left; margin-bottom: 6px; }
         .subtitle { color: #9aa4b2; font-size: 13px; margin-bottom: 14px; }
@@ -35,15 +36,16 @@
         .status-indicator { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:8px; vertical-align:middle; }
         .status-indicator.active { background: #34d399; box-shadow: 0 0 6px rgba(52,211,153,0.15); }
         .status-indicator.inactive { background: #fb7185; }
+        .status-indicator.slow { background: #fbbf24; }
         button { width:100%; padding:10px; font-size:15px; border-radius:8px; border:1px solid rgba(255,255,255,0.04); cursor:pointer; background:transparent; color:#dbeafe }
-        #startBtn { background: linear-gradient(90deg,#0ea5e9,#6366f1); color:white; border:none }
+        .card { background: linear-gradient(135deg, rgba(28,46,78,0.24), rgba(28,46,78,0.06)); padding: 12px; border-radius: 12px; margin-top: 12px; border:1px solid rgba(255,255,255,0.10); backdrop-filter: blur(10px) saturate(120%); box-shadow: 0 8px 24px rgba(2,6,23,0.45), inset 0 1px 0 rgba(255,255,255,0.06); }
         #stopBtn { background: transparent; border:1px solid rgba(255,255,255,0.06); color:#fda4af }
         #startBtn:disabled, #stopBtn:disabled { opacity:0.5; cursor:not-allowed }
         #startDriveBtn { margin-top:8px }
-        #stopDriveBtn { margin-top:8px }
+        #driverMap { height: 200px; border-radius: 12px; border: 2px solid rgba(255,255,255,0.10); background: #05060a; margin-top:8px; box-shadow: 0 6px 18px rgba(0,0,0,0.35); }
         .progress-outer { width:100%; height:12px; background: rgba(255,255,255,0.04); border-radius:8px; overflow:hidden; margin-top:8px }
         .progress-fill { height:100%; width:0%; background: linear-gradient(90deg,#34d399,#60a5fa); transition: width 600ms linear }
-        .info { background: transparent; padding: 8px; border-radius: 6px; color:#9aa4b2; font-size:13px }
+        .info { background: linear-gradient(135deg, rgba(28,46,78,0.18), rgba(28,46,78,0.04)); padding: 10px; border-radius: 12px; color:#9aa4b2; font-size:13px; border:1px solid rgba(255,255,255,0.08); backdrop-filter: blur(8px) saturate(115%) }
         .info p { margin:6px 0; }
         /* small driver map */
         #driverMap { height: 200px; border-radius: 10px; border: 2px solid rgba(255,255,255,0.06); background: #05060a; margin-top:8px }
@@ -61,6 +63,61 @@
         }
         /* Thinner ETA text styling */
         #etaDisplay { font-weight: 400; color: #34d399; }
+
+        /* Glassmorphism overrides */
+        body {
+            color: #e6eef8;
+            background-image:
+                radial-gradient(circle at 20% 20%, rgba(99,102,241,0.12), transparent 40%),
+                radial-gradient(circle at 80% 30%, rgba(236,72,153,0.10), transparent 40%);
+            background-attachment: fixed;
+        }
+        .container {
+            background: rgba(18, 24, 38, 0.55);
+            border-radius: 16px;
+            border: 1px solid rgba(255,255,255,0.06);
+            box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+            backdrop-filter: blur(18px) saturate(140%);
+            transition: all 0.25s ease;
+        }
+        .status-card {
+            background: rgba(18, 24, 38, 0.55);
+            border-radius: 16px;
+            border: 1px solid rgba(255,255,255,0.06);
+            box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+            backdrop-filter: blur(18px) saturate(140%);
+            padding: 12px;
+            transition: all 0.25s ease;
+        }
+        .card {
+            background: rgba(18, 24, 38, 0.55);
+            border-radius: 16px;
+            border: 1px solid rgba(255,255,255,0.06);
+            box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+            backdrop-filter: blur(18px) saturate(140%);
+            transition: all 0.25s ease;
+        }
+        .info {
+            background: rgba(18, 24, 38, 0.55);
+            border-radius: 16px;
+            border: 1px solid rgba(255,255,255,0.06);
+            box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+            backdrop-filter: blur(18px) saturate(140%);
+            transition: all 0.25s ease;
+        }
+        #driverMap {
+            border-radius: 16px;
+            border: 2px solid rgba(255,255,255,0.06);
+            box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+            background: #05060a;
+        }
+        button {
+            border-radius: 16px;
+            border: 1px solid rgba(255,255,255,0.06);
+            background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0));
+            box-shadow: 0 8px 28px rgba(0,0,0,0.45);
+            transition: all 0.25s ease;
+        }
     </style>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
@@ -93,8 +150,7 @@
 
         <button id="startBtn" onclick="startTracking()">Start Shift</button>
         <button id="stopBtn" onclick="stopTracking()" disabled>End Shift</button>
-        <button id="startDriveBtn" onclick="startDrive()">Start Route</button>
-        <button id="stopDriveBtn" onclick="stopDrive()" disabled>Stop Route</button>
+        <!-- Removed Start/Stop Route buttons for driver UI -->
 
         <div class="card" style="margin-top:12px;">
             <h3>🗺️ Driver Map & ETA</h3>
@@ -105,8 +161,6 @@
             <p style="color:#9aa4b2;margin-top:6px">Next stop: <strong id="nextStopDisplay">—</strong></p>
             <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
                 <label style="color:#9aa4b2;font-size:13px"><input type="checkbox" id="driverRoutesToggle" checked> Routes</label>
-                <label style="color:#9aa4b2;font-size:13px"><input type="checkbox" id="driverHostelsToggle" checked> Hostels</label>
-                <label style="color:#9aa4b2;font-size:13px"><input type="checkbox" id="driverClassesToggle" checked> Classes</label>
             </div>
         </div>
 
@@ -134,15 +188,16 @@
         let driverRouteLine = null;
         let routesLayer = null;
         let routesPolylinesMap = {};
-        let hostelsLayer = null;
-        let classesLayer = null;
+        // Buildings (hostels/classes) removed from driver map
 
         
         let driving = false;
         let lastSentPos = null;
         let lastSentTime = 0;
-        const MIN_SEND_INTERVAL = 1000;
+            const MIN_SEND_INTERVAL = 2000;
+            const BACKGROUND_INTERVAL = 2000;
         const MIN_MOVE_DISTANCE = 5; 
+            let backgroundTimerId = null;
 
         const busSelect = document.getElementById('busNumber');
         const routeSelect = document.getElementById('routeSelect');
@@ -173,23 +228,16 @@
 
         async function loadMapLayers(){
             if(!routesLayer) routesLayer = L.layerGroup().addTo(driverMap);
-            if(!hostelsLayer) hostelsLayer = L.layerGroup().addTo(driverMap);
-            if(!classesLayer) classesLayer = L.layerGroup().addTo(driverMap);
 
             await renderRoutes();
-            try{ const hres = await fetch('/api/hostels'); const hostels = await hres.json(); renderHostels(hostels);}catch(e){console.warn(e)}
-            try{ const cres = await fetch('/api/classes'); const classes = await cres.json(); renderClasses(classes);}catch(e){console.warn(e)}
 
-            document.getElementById('driverRoutesToggle').addEventListener('change', (e)=>{ if(e.target.checked) driverMap.addLayer(routesLayer); else driverMap.removeLayer(routesLayer); });
-            document.getElementById('driverHostelsToggle').addEventListener('change', (e)=>{ if(e.target.checked) driverMap.addLayer(hostelsLayer); else driverMap.removeLayer(hostelsLayer); });
-            document.getElementById('driverClassesToggle').addEventListener('change', (e)=>{ if(e.target.checked) driverMap.addLayer(classesLayer); else driverMap.removeLayer(classesLayer); });
+            document.getElementById('driverRoutesToggle').addEventListener('change', (e)=>{
+                if(e.target.checked) driverMap.addLayer(routesLayer);
+                else driverMap.removeLayer(routesLayer);
+            });
         }
 
-        function createLocationIcon(type){
-            const iconHtml = type==='hostel'?'🏠':type==='class'?'📚':'📍';
-            const bg = type==='hostel'? '#9C27B0': type==='class'? '#2196F3' : '#FF5722';
-            return L.divIcon({ html:`<div style="background:${bg};color:white;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;border:2px solid rgba(255,255,255,0.9);box-shadow:none">${iconHtml === '🏠' || iconHtml === '📚' ? '' : ''}</div>`, iconSize:[28,28], iconAnchor:[14,14], popupAnchor:[0,-14] });
-        }
+        // Removed building icons and renderers for a cleaner driver view
 
         async function getOSRMRoute(waypoints){
             try{
@@ -218,8 +266,7 @@
             if(selectedRoute) highlightRoute(selectedRoute);
         }
 
-        function renderHostels(hostels){ if(!hostelsLayer) hostelsLayer=L.layerGroup().addTo(driverMap); hostelsLayer.clearLayers(); hostels.forEach(h=>{ L.marker([h.lat,h.lng], { icon:createLocationIcon('hostel'), title:h.name }).bindPopup(`<strong>${h.name}</strong><br/>Capacity: ${h.capacity||'—'}`).addTo(hostelsLayer); }); }
-        function renderClasses(classes){ if(!classesLayer) classesLayer=L.layerGroup().addTo(driverMap); classesLayer.clearLayers(); classes.forEach(c=>{ L.marker([c.lat,c.lng], { icon:createLocationIcon('class'), title:c.name }).bindPopup(`<strong>${c.name}</strong>`).addTo(classesLayer); }); }
+        // Hostels and classes rendering removed
 
         function highlightRoute(routeId){
             Object.entries(routesPolylinesMap).forEach(([id,obj])=>{
@@ -256,7 +303,28 @@
                 let moved = true;
                 if(lastSentPos){ const d = Math.sqrt(Math.pow(lat-lastSentPos.lat,2)+Math.pow(lng-lastSentPos.lng,2))*111000; moved = d>=MIN_MOVE_DISTANCE; }
                 if(moved || now - lastSentTime >= MIN_SEND_INTERVAL){ updateDriverPosition(lat,lng); computeAndShowETA(lat,lng); if(driving) updateDriveProgress(lat,lng); sendLocation(pos); lastSentPos={lat,lng}; lastSentTime=now; }
-            }, showError, { enableHighAccuracy:true, maximumAge:500, timeout:5000 });
+            }, showError, { enableHighAccuracy:true, maximumAge:5000, timeout:15000 });
+
+                    // Background updates every 2s even when tab is inactive
+                    backgroundTimerId = setInterval(()=>{
+                        if(!selectedBus) return;
+                        try{
+                            navigator.geolocation.getCurrentPosition((pos)=>{
+                                const now = Date.now(); const lat = pos.coords.latitude, lng = pos.coords.longitude;
+                                // Always send in background, even if position unchanged
+                                sendLocation(pos);
+                                updateDriverPosition(lat,lng); computeAndShowETA(lat,lng); if(driving) updateDriveProgress(lat,lng);
+                                lastSentPos={lat,lng}; lastSentTime=now;
+                            }, (err)=>{
+                                // If geolocation fails (tab hidden or throttled), send last known position to keep bus online
+                                if(lastSentPos){
+                                    const synthetic = { coords: { latitude: lastSentPos.lat, longitude: lastSentPos.lng } };
+                                    sendLocation(synthetic);
+                                    updateDriverPosition(lastSentPos.lat,lastSentPos.lng);
+                                }
+                            }, { enableHighAccuracy:false, maximumAge:10000, timeout:8000 });
+                        }catch(e){ /* ignore */ }
+                    }, BACKGROUND_INTERVAL);
 
             document.getElementById('trackingStatus').textContent = `Active - Bus ${selectedBus}`;
             document.getElementById('statusDot').classList.add('active'); document.getElementById('statusDot').classList.remove('inactive');
@@ -266,6 +334,7 @@
 
         function stopTracking(){
             if(watchId){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+                if(backgroundTimerId){ try{ clearInterval(backgroundTimerId); }catch(e){} backgroundTimerId=null; }
             if(selectedBus){ fetch(`/api/bus/${selectedBus}`, { method:'DELETE' }).then(()=>console.log(`Bus ${selectedBus} removed`)); }
             document.getElementById('trackingStatus').textContent='Inactive'; document.getElementById('statusDot').classList.remove('active'); document.getElementById('statusDot').classList.add('inactive');
             document.getElementById('startBtn').disabled=false; document.getElementById('stopBtn').disabled=true; busSelect.disabled=false; updateCount=0; document.getElementById('updateCount').textContent='0';
@@ -275,7 +344,7 @@
             if(!selectedBus) return;
             const location = { lat: position.coords.latitude, lng: position.coords.longitude, lastUpdate: new Date().toISOString(), routeId: selectedRoute || null };
             fetch(`/api/bus/${selectedBus}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(location) })
-            .then(res=>res.json()).then(()=>{ updateCount++; document.getElementById('updateCount').textContent = updateCount; updateDriverPosition(location.lat, location.lng); computeAndShowETA(location.lat, location.lng); if(driving) updateDriveProgress(location.lat, location.lng); })
+            .then(res=>res.json()).then(()=>{ updateCount++; document.getElementById('updateCount').textContent = updateCount; updateDriverPosition(location.lat, location.lng); computeAndShowETA(location.lat, location.lng); if(driving) updateDriveProgress(location.lat, location.lng); const dot = document.getElementById('statusDot'); if(dot){ dot.classList.add('active'); dot.classList.remove('inactive'); dot.classList.remove('slow'); } })
             .catch(e=>console.error('send error',e));
         }
 
@@ -304,7 +373,28 @@
 
         function formatSeconds(s){ if(!isFinite(s)) return '—'; if(s<60) return `${s}s`; const m=Math.floor(s/60); const rem=s%60; return `${m}m ${rem}s`; }
 
-        function showError(err){ let message=''; switch(err.code){ case err.PERMISSION_DENIED: message='Please allow location access'; break; case err.POSITION_UNAVAILABLE: message='Location unavailable'; break; case err.TIMEOUT: message='Location request timed out'; break; } alert(message); stopTracking(); }
+        function showError(err){
+            const statusEl = document.getElementById('trackingStatus');
+            const dot = document.getElementById('statusDot');
+            switch(err.code){
+                case err.PERMISSION_DENIED:
+                    alert('Please allow location access');
+                    stopTracking();
+                    break;
+                case err.POSITION_UNAVAILABLE:
+                    if(statusEl) statusEl.textContent = 'GPS unavailable, retrying…';
+                    if(dot){ dot.classList.remove('active'); dot.classList.remove('inactive'); dot.classList.add('slow'); }
+                    break;
+                case err.TIMEOUT:
+                    if(statusEl) statusEl.textContent = 'GPS slow, retrying…';
+                    if(dot){ dot.classList.remove('active'); dot.classList.remove('inactive'); dot.classList.add('slow'); }
+                    // Do not stop tracking on timeout; background timer will retry
+                    break;
+                default:
+                    if(statusEl) statusEl.textContent = 'Tracking issue, retrying…';
+                    if(dot){ dot.classList.remove('active'); dot.classList.remove('inactive'); dot.classList.add('slow'); }
+            }
+        }
 
         // Drive progress helpers (haversine and progress along route)
         function haversineMeters(aLat,aLng,bLat,bLng){ const R=6371000; const toRad=Math.PI/180; const dLat=(bLat-aLat)*toRad; const dLon=(bLng-aLng)*toRad; const lat1=aLat*toRad, lat2=bLat*toRad; const x=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)*Math.sin(dLon/2); const c=2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x)); return R*c; }

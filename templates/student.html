@@ -3,62 +3,76 @@
 <head>
     <title>Bus Tracker - Student View</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        /* Minimal, nonchalant dark theme */
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #07070a;
-            color: #e6eef8;
-            min-height: 100vh;
-        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #07070a; color: #e6eef8; min-height: 100vh; background-image:
+            radial-gradient(circle at 20% 20%, rgba(99,102,241,0.12), transparent 40%),
+            radial-gradient(circle at 80% 30%, rgba(236,72,153,0.10), transparent 40%);
+            background-attachment: fixed; }
 
-        .header {
-            background: transparent;
-            padding: 18px 12px;
-            text-align: left;
-        }
+        .header { background: transparent; padding: 18px 12px; text-align: left; display:flex; align-items:center; justify-content:space-between; gap:12px }
         .header h1 { font-size: 20px; color: #e6eef8; margin-bottom: 4px; }
         .header p { color: #9aa4b2; font-size: 13px; margin-top: 2px }
-        /* Unified icon styling */
         .icon { display:inline-block; font-size:16px; line-height:1; vertical-align:middle; opacity:0.9; margin-right:6px }
-        /* Map tiny markers (fixed pixel size) */
-        .tiny-marker { width:8px; height:8px; border-radius:50%; display:inline-block; border:1px solid rgba(255,255,255,0.6); box-shadow:0 0 0 1px rgba(0,0,0,0.25); transition: transform 120ms ease; transform-origin:center }
-        .tiny-marker:hover { transform: scale(1.25); }
-        .tiny-hostel { background:#9C27B0 }
-        .tiny-class { background:#2196F3 }
-        .marker-wrapper { width:10px; height:10px }
-        .leaflet-div-icon { background: transparent !important; border: none !important; }
 
         .main-container { display:flex; gap:18px; max-width:1200px; margin: 12px auto; padding: 0 12px; }
-        .sidebar { flex:1; min-width:260px; max-width:380px; }
-        .map-container { flex:1.5; min-height:0; }
+        .sidebar { flex:1; min-width:260px; max-width:360px; }
+        .map-container { flex:1.5; min-height:0; position: relative; }
 
-        /* Smaller map like admin, with white border */
-        #map {
-            height: 500px;
-            border-radius: 12px;
-            border: 2px solid rgba(255,255,255,0.95);
-            box-shadow: none;
-            background: #05060a;
-        }
+        #map { height: 500px; border-radius: 16px; border: 2px solid rgba(255,255,255,0.06); box-shadow: 0 8px 28px rgba(0,0,0,0.45); background: #05060a; }
 
-        .card {
-            background: rgba(255,255,255,0.02);
-            border-radius: 10px;
-            padding: 14px;
-            margin-bottom: 14px;
-            border: 1px solid rgba(255,255,255,0.04);
-        }
+        .card { background: rgba(18, 24, 38, 0.55); border-radius: 16px; padding: 12px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(18px) saturate(140%); box-shadow: 0 8px 28px rgba(0,0,0,0.45); transition: all 0.25s ease; }
         .card h3 { color: #dbeafe; font-size:15px; margin-bottom:10px }
 
-        .route-item, .bus-item, .toggle-item, .stat-box { background: transparent; border-radius:8px; }
-        .route-item { padding:10px; border-left:4px solid; font-size:13px }
-        .route-item.active { background: rgba(255,255,255,0.02) }
+        .stats-grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px }
+        .stat-box { background: rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius: 8px; padding:8px; text-align:center }
 
-        .empty-state { color: #7c8898; padding:24px; }
+        .empty-state { color: #7c8898; padding:16px; font-size:12px }
+        .stat-number { font-size:18px; color:#cbd5e1 }
+        .stat-label { font-size:11px; color:#9aa4b2 }
 
-        .stat-number { font-size:24px; color:#cbd5e1 }
+        /* Map overlays */
+        .map-overlay { position:absolute; top:8px; left:8px; display:flex; gap:8px; z-index:500; }
+        .overlay-pill { background: rgba(18, 24, 38, 0.55); border:1px solid rgba(255,255,255,0.06); color:#e6eef8; padding:8px 12px; border-radius:16px; font-size:12px; backdrop-filter: blur(18px) saturate(140%); box-shadow: 0 8px 28px rgba(0,0,0,0.45); transition: all 0.25s ease }
+        .info-strip { position:absolute; top:8px; left:8px; right:8px; display:flex; gap:8px; flex-wrap:wrap; z-index:600 }
+        .info-item { background: rgba(18, 24, 38, 0.55); border:1px solid rgba(255,255,255,0.06); color:#e6eef8; padding:8px 12px; border-radius:16px; font-size:12px; backdrop-filter: blur(18px) saturate(140%); box-shadow: 0 8px 28px rgba(0,0,0,0.45); transition: all 0.25s ease }
+        .info-label { color:#9aa4b2; margin-right:6px }
+        .info-eta { background: rgba(23,32,54,0.32); border-color:#304b8a; color:#cfe3ff; font-weight:600 }
+        .overlay-right { position:absolute; top:8px; right:8px; z-index:500 }
+        .eta-pill { background:#172036; border-color:#304b8a; color:#cfe3ff; font-weight:600 }
+
+        /* Route chips */
+        .route-chips { display:flex; flex-wrap:wrap; gap:8px }
+        .route-chip { padding:8px 12px; border-radius:999px; font-size:12px; border:1px solid rgba(255,255,255,0.06); cursor:pointer; background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0)); color:#e6eef8; transition: all 0.25s ease }
+        .route-chip.active { background: rgba(255,255,255,0.08); box-shadow: 0 0 0 2px rgba(255,255,255,0.12) }
+            /* Glossy buttons */
+            #locateMeBtn { background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0)) !important; border:1px solid rgba(255,255,255,0.06) !important; border-radius:16px !important; box-shadow: 0 8px 28px rgba(0,0,0,0.45); transition: all 0.25s ease }
+        .route-chip:active { transform: scale(0.98) }
+
+        /* Active buses smaller */
+        .bus-item { display:flex; align-items:center; justify-content:space-between; padding:6px 8px; border-left:4px solid; margin-bottom:6px; font-size:12px; transition: transform 120ms ease, background 120ms ease }
+        .bus-item.active-route { transform: scale(1.06); background: rgba(255,255,255,0.04) }
+        .bus-info { display:flex; align-items:center; gap:8px }
+        .bus-dot { width:20px; height:20px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px }
+        .bus-name { opacity:0.8 }
+        .bus-item:hover .bus-name { opacity:1 }
+
+        /* Tiny stop markers */
+        .marker-wrapper { width:10px; height:10px }
+        .tiny-marker { display:inline-block; width:10px; height:10px; border-radius:50%; border:1px solid rgba(0,0,0,0.6) }
+        .tiny-hostel { background:#9C27B0 }
+        .tiny-class { background:#2196F3 }
+
+        /* Layer control */
+        .layer-control { display:flex; gap:8px; flex-wrap:wrap }
+        .toggle-item { display:flex; align-items:center; gap:8px; background: rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:6px 8px; border-radius:8px }
+        .toggle-label { font-size:12px; color:#e6eef8 }
+        .layer-icon { width:16px; height:8px; border-radius:999px; display:inline-block; border:1px solid rgba(255,255,255,0.2) }
+
+        /* Status pulse dot */
+        .pulse { width:6px; height:6px; border-radius:50%; display:inline-block; margin-right:6px; background:#34d399; box-shadow:0 0 0 rgba(52,211,153,0.4); animation: pulse 2s infinite }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52,211,153,0.4) } 70% { box-shadow: 0 0 0 6px rgba(52,211,153,0) } 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0) } }
 
         @media (max-width: 968px) {
             .main-container { flex-direction:column; padding:12px }
@@ -67,125 +81,67 @@
             #map { height: 420px }
         }
     </style>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 </head>
 <body>
     <div class="header">
-        <h1><span class="icon">🚍</span>{{ institute_name | default('INSTITUTE') }} TRANSPORT SYSTEM</h1>
-        <p>Real-time bus locations across all campuses</p>
+        <div>
+            <h1><span class="icon">🚍</span>Never Miss Your Campus Shuttle</h1>
+            <p>Powered by {{ institute_name | default('INSTITUTE') }} • Live tracking</p>
+        </div>
+        <button id="locateMeBtn" style="padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:#0f0f23;color:#e6eef8;cursor:pointer">📍 Locate me</button>
     </div>
 
     <div class="main-container">
         <div class="sidebar">
             <div class="card">
-                <h3>
-                    <span class="icon">📊</span>
-                    Live Statistics
-                </h3>
+                <h3><span class="icon">📊</span> Live Statistics</h3>
                 <div class="stats-grid">
-                    <div class="stat-box">
-                        <div class="stat-number" id="activeBusCount">0</div>
-                        <div class="stat-label">Active Buses</div>
-                    </div>
-                    <div class="stat-box">
-                        <div class="stat-number">20</div>
-                        <div class="stat-label">Total Fleet</div>
-                    </div>
+                    <div class="stat-box"><div class="stat-number" id="activeBusCount">0</div><div class="stat-label">Active Buses</div></div>
+                    <div class="stat-box"><div class="stat-number">20</div><div class="stat-label">Total Fleet</div></div>
                 </div>
             </div>
 
             <div class="card">
-                <h3>
-                    <span class="icon">🎯</span>
-                    Track Bus
-                </h3>
-                <div style="display:flex;gap:10px;align-items:center;">
-                    <select id="trackBusSelect" style="flex:1;padding:10px;border-radius:8px;border:1px solid #2a2a3e;background:#0f0f23;color:#fff">
-                        <option value="">— Select bus to follow —</option>
-                    </select>
-                    <label style="display:flex;align-items:center;gap:6px;color:#9aa;white-space:nowrap">
-                        <input type="checkbox" id="followCheckbox" checked style="width:16px;height:16px"> Follow
-                    </label>
-                </div>
-            </div>
-
-            <div class="card">
-                <h3>
-                    <span>📍</span>
-                    Map Layers
-                </h3>
-                <div class="layer-control">
-                    <label class="toggle-item">
-                        <input type="checkbox" id="routesToggle" checked>
-                        <span class="toggle-label">Routes</span>
-                        <span class="layer-icon" style="background: #FF5722;"></span>
-                    </label>
-                    <label class="toggle-item">
-                        <input type="checkbox" id="hostelsToggle" checked>
-                        <span class="toggle-label">Hostels</span>
-                        <span class="layer-icon" style="background: #9C27B0;"></span>
-                    </label>
-                    <label class="toggle-item">
-                        <input type="checkbox" id="classesToggle" checked>
-                        <span class="toggle-label">Classes</span>
-                        <span class="layer-icon" style="background: #2196F3;"></span>
-                    </label>
-                </div>
-            </div>
-
-            <div class="card">
-                <h3>
-                    <span>🛣️</span>
-                    Routes
-                </h3>
-                <div class="route-selector" id="routesContainer"></div>
+                <h3><span>🛣️</span> Routes</h3>
+                <div class="route-chips" id="routesContainer"></div>
             </div>
 
             <div class="card" id="routeDetailsCard" style="display:none">
-                <h3>
-                    <span>📍</span>
-                    Route Details
-                </h3>
+                <h3><span>📍</span> Route Details</h3>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px">
-                    <div style="text-align:center">
-                        <div style="font-size:12px; color:#9aa4b2">ETA</div>
-                        <div id="etaValue" style="font-size:18px; font-weight:400; color:#34d399; margin-top:4px">--</div>
-                    </div>
-                    <div style="text-align:center">
-                        <div style="font-size:12px; color:#9aa4b2">Walk Distance</div>
-                        <div id="walkDistance" style="font-size:18px; font-weight:600; color:#667eea; margin-top:4px">--</div>
-                    </div>
+                    <div style="text-align:center"><div style="font-size:12px; color:#9aa4b2">ETA</div><div id="etaValue" style="font-size:18px; font-weight:600; color:#34d399; margin-top:4px">--</div></div>
+                    <div style="text-align:center"><div style="font-size:12px; color:#9aa4b2">Walk Distance</div><div id="walkDistance" style="font-size:18px; font-weight:600; color:#667eea; margin-top:4px">--</div></div>
                 </div>
-                <div id="busesOnRoute" style="margin-top:12px; font-size:12px; color:#9aa4b2">
-                    <span>🚌 Buses on route: <span id="busesOnRouteCount">-</span></span>
-                </div>
+                <div id="busesOnRoute" style="margin-top:12px; font-size:12px; color:#9aa4b2">🚌 Buses on route: <span id="busesOnRouteCount">-</span></div>
             </div>
 
             <div class="card">
-                <h3>
-                    <span>🚍</span>
-                    Active Buses
-                </h3>
-                <div class="active-buses" id="activeBuses">
-                    <div class="empty-state">
-                        <svg fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/>
-                            <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1v-5a1 1 0 00-.293-.707l-2-2A1 1 0 0015 7h-1z"/>
-                        </svg>
-                        <p>No buses currently active</p>
-                    </div>
-                </div>
-                <div class="last-update">
-                    Last updated: <span id="lastUpdate">Loading...</span>
-                </div>
+                <h3><span>🚍</span> Active Buses</h3>
+                <div class="active-buses" id="activeBuses"><div class="empty-state"><p>No buses currently active</p></div></div>
+                <div class="last-update">Last updated: <span id="lastUpdate">Loading...</span></div>
             </div>
         </div>
 
         <div class="map-container">
+            <div class="info-strip">
+                <div class="info-item"><span class="info-label">Route</span><span id="currentRouteOverlay">—</span></div>
+                <div class="info-item info-eta">ETA <span id="etaOverlay">--</span></div>
+                <div class="info-item"><span class="info-label">Active</span><span id="activeCountOverlay">0</span></div>
+                <div class="info-item"><span class="info-label">Last</span><span id="lastUpdateOverlay">—</span></div>
+            </div>
             <div id="map"></div>
+            <div class="card" style="margin-top:10px">
+                <h3><span>📍</span> Map Layers</h3>
+                <div class="layer-control">
+                    <label class="toggle-item"><input type="checkbox" id="routesToggle" checked><span class="toggle-label">Routes</span><span class="layer-icon" style="background: #FF5722;"></span></label>
+                    <label class="toggle-item"><input type="checkbox" id="hostelsToggle" checked><span class="toggle-label">Hostels</span><span class="layer-icon" style="background: #9C27B0;"></span></label>
+                    <label class="toggle-item"><input type="checkbox" id="classesToggle" checked><span class="toggle-label">Classes</span><span class="layer-icon" style="background: #2196F3;"></span></label>
+                </div>
+            </div>
         </div>
     </div>
 
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         let map;
         let busMarkers = {};
@@ -197,623 +153,373 @@
         let userLocation = null;
         let walkingLine = null;
         let busRouteMap = {}; // Maps bus number to route ID
+        let userMarker = null;
+        let userWatchId = null;
+        const OFFLINE_MS = 15000; // remove buses after ~15 seconds of no updates
         const colors = [
-            '#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8',
-            '#F7DC6F', '#BB8FCE', '#85C1E2', '#F8B739', '#52B788',
-            '#E76F51', '#2A9D8F', '#E9C46A', '#F4A261', '#264653',
-            '#E63946', '#A8DADC', '#457B9D', '#1D3557', '#F1FAEE'
+            '#FF3B30', '#34C759', '#007AFF', '#FF9500', '#AF52DE',
+            '#5AC8FA', '#FF2D55', '#FFD60A', '#32D74B', '#5856D6',
+            '#FF9F0A', '#00C7BE', '#E82D2D', '#00A8FF', '#9B59B6',
+            '#F1C40F', '#2ECC71', '#E74C3C', '#3498DB', '#E67E22'
         ];
 
         let prevBusPositions = {};
-        
-        // Get user location on load
+        let prevBusTimes = {};
+        let prevBusRotation = {};
+        let prevTrackedState = {};
+        let prevRouteSelState = {};
+        let followEnabled = true;
+
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition((pos) => {
                 userLocation = [pos.coords.latitude, pos.coords.longitude];
-                console.log('User location:', userLocation);
+                if (map) { updateUserMarker(userLocation); }
             }, (err) => console.log('Geolocation error:', err));
         }
-        
-        // Load bus routes mapping
+
+        function updateUserMarker(latlng){
+            try{
+                if(!map) return;
+                if(!userMarker){
+                    userMarker = L.circleMarker(latlng, { radius: 6, color: '#ffffff', weight: 2, fillColor: '#34d399', fillOpacity: 1 }).addTo(map);
+                }else{
+                    userMarker.setLatLng(latlng);
+                }
+            }catch(e){ /* ignore */ }
+        }
+
         async function loadBusRoutes() {
-            try {
-                const res = await fetch('/api/bus-routes');
-                busRouteMap = await res.json();
-            } catch(e) {
-                console.error('Error loading bus routes:', e);
-            }
+            try { const res = await fetch('/api/bus-routes'); busRouteMap = await res.json(); } catch(e) { console.error('Error loading bus routes:', e); }
         }
-        
+
         function calcDistance(lat1, lng1, lat2, lng2) {
-            const R = 6371; // km
-            const dLat = (lat2 - lat1) * Math.PI / 180;
-            const dLng = (lng2 - lng1) * Math.PI / 180;
-            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                      Math.sin(dLng/2) * Math.sin(dLng/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            return R * c * 1000; // meters
+            const R = 6371; const dLat = (lat2 - lat1) * Math.PI / 180; const dLng = (lng2 - lng1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng/2) * Math.sin(dLng/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); return R * c * 1000;
         }
-        
-        function calcBearing(from, to) {
-            const rad = Math.atan2(to[1] - from[1], to[0] - from[0]);
-            return (rad * 180 / Math.PI + 90) % 360;
-        }
-        
-        function createIcon(busNum, color, size = 50, rotation = 0) {
-            const canvas = document.createElement('canvas');
-            canvas.width = size;
-            canvas.height = size;
-            const ctx = canvas.getContext('2d');
-            
-            ctx.save();
-            ctx.translate(size/2, size/2);
-            ctx.rotate(rotation * Math.PI / 180);
-            ctx.translate(-size/2, -size/2);
+        function calcBearing(from, to) { const rad = Math.atan2(to[1] - from[1], to[0] - from[0]); return (rad * 180 / Math.PI + 90) % 360; }
 
-            ctx.fillStyle = color;
-            ctx.strokeStyle = 'black';
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.arc(size/2, size/2 - size/8, Math.max(12, size/2 - 7), 0, 2 * Math.PI);
-            ctx.fill();
-            ctx.stroke();
-            
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.moveTo(size/2, size/2 + size/6);
-            ctx.lineTo(size/2 - size/6, size/2 - size/8);
-            ctx.lineTo(size/2 + size/6, size/2 - size/8);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
+                function createIcon(busNum, color, size = 24, rotation = 0, glow = false) {
+                        const half = Math.round(size/2);
+                        const stroke = Math.max(1, Math.round(size * 0.08));
+                        const headR = Math.round(size * 0.34);
+                        const headCY = Math.round(size * 0.46);
+                        const tipY = size - 2;
+                        const fontSize = Math.max(10, Math.round(size * 0.46));
+                        const textY = headCY; // center number in the head
+                        const glowFill = glow ? `${color}33` : 'none';
+                        const path = `M ${half} ${tipY} L ${Math.round(half - headR * 0.60)} ${Math.round(headCY + headR * 0.35)} A ${headR} ${headR} 0 1 1 ${Math.round(half + headR * 0.60)} ${Math.round(headCY + headR * 0.35)} L ${half} ${tipY} Z`;
+                        const vbPad = 3;
+                        const svg = `
+                        <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="-${vbPad} -${vbPad} ${size + vbPad*2} ${size + vbPad*2}">
+                            <defs>
+                                <filter id="busShadow" x="-50%" y="-50%" width="200%" height="200%">
+                                    <feDropShadow dx="0" dy="1" stdDeviation="1.1" flood-color="rgba(0,0,0,0.35)" />
+                                </filter>
+                            </defs>
+                            <g filter="url(#busShadow)">
+                                <path d="${path}" fill="${glowFill}" />
+                                <path d="${path}" fill="${color}" stroke="rgba(255,255,255,0.75)" stroke-width="${stroke}" />
+                                <text x="${half}" y="${textY}" text-anchor="middle" dominant-baseline="central"
+                                            fill="rgba(255,255,255,0.98)" font-family="Segoe UI, Arial" font-weight="700" font-size="${fontSize}">${busNum}</text>
+                            </g>
+                        </svg>`;
+                        // Anchor at the bottom tip for accurate placement
+                        return L.divIcon({ className: 'bus-icon', html: svg, iconSize: [size, size], iconAnchor: [half, tipY] });
+                }
 
-            ctx.fillStyle = 'white';
-            ctx.font = `bold ${Math.max(10, Math.round(size/4))}px Arial`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(busNum, size/2, size/2 - size/8);
-            
-            ctx.restore();
-
-            return L.icon({
-                iconUrl: canvas.toDataURL(),
-                iconSize: [size, size],
-                iconAnchor: [Math.round(size/2), Math.round(size/2)]
-            });
-        }
-
-        function createLocationIcon(type) {
-            const html = type === 'hostel'
-                ? '<span class="tiny-marker tiny-hostel"></span>'
-                : '<span class="tiny-marker tiny-class"></span>';
-            return L.divIcon({ className: 'marker-wrapper', html, iconSize: [10,10], iconAnchor: [5,5], popupAnchor: [0, -8] });
-        }
+        function createLocationIcon(type) { const html = type === 'hostel' ? '<span class="tiny-marker tiny-hostel"></span>' : '<span class="tiny-marker tiny-class"></span>'; return L.divIcon({ className: 'marker-wrapper', html, iconSize: [10,10], iconAnchor: [5,5], popupAnchor: [0, -8] }); }
 
         let trackedBus = null;
-        let followEnabled = true;
-        let visibleLayers = {
-            routes: true,
-            hostels: true,
-            classes: true
-        };
+        let visibleLayers = { routes: true, hostels: true, classes: true };
+
+        function parseIsoTime(iso) { try { return new Date(iso).getTime(); } catch(e) { return null; } }
+        function computeSpeed(busNum, position, lastUpdateIso) {
+            const prevPos = prevBusPositions[busNum]; const prevTime = prevBusTimes[busNum]; const currTime = parseIsoTime(lastUpdateIso);
+            if (!prevPos || !prevTime || !currTime) return null; const meters = calcDistance(prevPos[0], prevPos[1], position[0], position[1]); const secs = Math.max(1, (currTime - prevTime) / 1000); const kmh = (meters / 1000) / (secs / 3600); return Math.round(kmh);
+        }
+        function determineStatus(busNum, position, lastUpdateIso) {
+            const currTime = Date.now();
+            const last = parseIsoTime(lastUpdateIso);
+            // offline threshold tightened: treat as Offline after OFFLINE_MS
+            if (!last || (currTime - last) > OFFLINE_MS) return 'Offline';
+            const prevPos = prevBusPositions[busNum];
+            if (prevPos) { const moved = calcDistance(prevPos[0], prevPos[1], position[0], position[1]); if (moved < 2) return 'Idle'; }
+            return 'Moving';
+        }
+        function getRouteById(id) { return allRoutes.find(r => r.id === id); }
+        function getNextStopForRoute(route, position) {
+            if (!route || !route.waypoints || route.waypoints.length === 0) return { name: null, index: 0 };
+            let bestIdx = 0; let bestD = Infinity; route.waypoints.forEach((wp, i) => { const d = calcDistance(position[0], position[1], wp[0], wp[1]); if (d < bestD) { bestD = d; bestIdx = i; } });
+            const nextIdx = Math.min(route.waypoints.length - 1, bestIdx + 1); const nextName = (route.stops && route.stops[nextIdx]) ? route.stops[nextIdx] : `Stop ${nextIdx + 1}`; return { name: nextName, index: nextIdx };
+        }
+        function buildBusPopup(busNum, busData) {
+            const routeId = busRouteMap[busNum]; const route = getRouteById(routeId); const position = [busData.lat, busData.lng]; const status = determineStatus(busNum, position, busData.lastUpdate); const speed = computeSpeed(busNum, position, busData.lastUpdate); const nextStop = route ? getNextStopForRoute(route, position).name : null; const routeName = route ? route.name : '—'; const last = busData.lastUpdate ? new Date(busData.lastUpdate).toLocaleTimeString() : '—';
+            return `<div style="min-width:220px;background:#0f1220;color:#e6eef8;border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px"><div style="font-weight:600;margin-bottom:6px">Bus ${busNum}</div><div style="font-size:13px;color:#9aa4b2">Route: <span style="color:#dbeafe">${routeName}</span></div><div style="font-size:13px;color:#9aa4b2">Status: <span style="color:${status==='Moving'?'#34d399':status==='Idle'?'#fbbf24':'#fb7185'}">${status}</span></div><div style="font-size:13px;color:#9aa4b2">Last update: <span style="color:#dbeafe">${last}</span></div><div style="font-size:13px;color:#9aa4b2">Speed: <span style="color:#dbeafe">${speed? speed+' km/h' : '—'}</span></div><div style="font-size:13px;color:#9aa4b2">Next stop: <span style="color:#dbeafe">${nextStop || '—'}</span></div></div>`;
+        }
 
         function updateLayerVisibility(layer, visible) {
             visibleLayers[layer] = visible;
-            
-            if (layer === 'hostels') {
-                Object.values(hostelMarkers).forEach(m => {
-                    if (visible) map.addLayer(m);
-                    else map.removeLayer(m);
-                });
-            } else if (layer === 'classes') {
-                Object.values(classMarkers).forEach(m => {
-                    if (visible) map.addLayer(m);
-                    else map.removeLayer(m);
-                });
-            } else if (layer === 'routes') {
-                Object.values(routePolylines).forEach(p => {
-                    if (visible) map.addLayer(p);
-                    else map.removeLayer(p);
-                });
-            }
+            if (layer === 'hostels') { Object.values(hostelMarkers).forEach(m => { if (visible) map.addLayer(m); else map.removeLayer(m); }); }
+            else if (layer === 'classes') { Object.values(classMarkers).forEach(m => { if (visible) map.addLayer(m); else map.removeLayer(m); }); }
+            else if (layer === 'routes') { Object.values(routePolylines).forEach(p => { if (visible) map.addLayer(p); else map.removeLayer(p); }); }
         }
 
         function loadHostels() {
-            fetch('/api/hostels')
-                .then(r => r.json())
-                .then(hostels => {
-                    // Clear existing
-                    Object.values(hostelMarkers).forEach(m => map.removeLayer(m));
-                    hostelMarkers = {};
-
-                    hostels.forEach(hostel => {
-                        const marker = L.marker([hostel.lat, hostel.lng], {
-                            icon: createLocationIcon('hostel'),
-                            title: hostel.name
-                        }).addTo(map);
-                        marker.bindPopup(`<b>${hostel.name}</b><br>Capacity: ${hostel.capacity}`);
-                        hostelMarkers[hostel.id] = marker;
-                        if (!visibleLayers.hostels) map.removeLayer(marker);
-                    });
-                })
-                .catch(e => console.error('Error loading hostels:', e));
+            fetch('/api/hostels').then(r => r.json()).then(hostels => { Object.values(hostelMarkers).forEach(m => map.removeLayer(m)); hostelMarkers = {}; hostels.forEach(hostel => { const marker = L.marker([hostel.lat, hostel.lng], { icon: createLocationIcon('hostel'), title: hostel.name }).addTo(map); marker.bindPopup(`<b>${hostel.name}</b><br>Capacity: ${hostel.capacity}`); hostelMarkers[hostel.id] = marker; if (!visibleLayers.hostels) map.removeLayer(marker); }); }).catch(e => console.error('Error loading hostels:', e));
         }
-
         function loadClasses() {
-            fetch('/api/classes')
-                .then(r => r.json())
-                .then(classes => {
-                    // Clear existing
-                    Object.values(classMarkers).forEach(m => map.removeLayer(m));
-                    classMarkers = {};
-
-                    classes.forEach(cls => {
-                        const marker = L.marker([cls.lat, cls.lng], {
-                            icon: createLocationIcon('class'),
-                            title: cls.name
-                        }).addTo(map);
-                        marker.bindPopup(`<b>${cls.name}</b><br>Dept: ${cls.department}`);
-                        classMarkers[cls.id] = marker;
-                        if (!visibleLayers.classes) map.removeLayer(marker);
-                    });
-                })
-                .catch(e => console.error('Error loading classes:', e));
+            fetch('/api/classes').then(r => r.json()).then(classes => { Object.values(classMarkers).forEach(m => map.removeLayer(m)); classMarkers = {}; classes.forEach(cls => { const marker = L.marker([cls.lat, cls.lng], { icon: createLocationIcon('class'), title: cls.name }).addTo(map); marker.bindPopup(`<b>${cls.name}</b><br>Dept: ${cls.department}`); classMarkers[cls.id] = marker; if (!visibleLayers.classes) map.removeLayer(marker); }); }).catch(e => console.error('Error loading classes:', e));
         }
 
         function loadRoutes() {
-            fetch('/api/routes')
-                .then(r => r.json())
-                .then(routes => {
-                    // Clear existing
-                    Object.values(routePolylines).forEach(p => map.removeLayer(p));
-                    routePolylines = {};
-                    allRoutes = routes;
-
-                    routes.forEach(route => {
-                        // Get road-based route from OSRM
-                        getOSRMRoute(route.waypoints).then(routeCoords => {
-                            const polyline = L.polyline(routeCoords || route.waypoints, {
-                                color: route.color,
-                                weight: 4,
-                                opacity: 0.8,
-                                dashArray: '5, 5'
-                            }).addTo(map);
-                            
-                            // Create popup with all stops
-                            const stopsText = (route.stops || []).map((s, i) => {
-                                const wp = route.waypoints[i];
-                                return `${s} (${wp[0].toFixed(4)}, ${wp[1].toFixed(4)})`;
-                            }).join('<br>');
-                            
-                            polyline.bindPopup(`<b>${route.name}</b><br><small>${stopsText || route.waypoints.map(wp => wp.join(',')).join('<br>')}</small>`);
-                            polyline.on('click', () => selectRoute(route.id));
-                            
-                            // Add stop markers with tooltips
-                            route.waypoints.forEach((wp, idx) => {
-                                const stopName = (route.stops && route.stops[idx]) || `Stop ${idx + 1}`;
-                                const icon = L.divIcon({ className: 'marker-wrapper', html: `<span class="tiny-marker" style="background:${route.color}"></span>`, iconSize:[10,10], iconAnchor:[5,5] });
-                                const marker = L.marker([wp[0], wp[1]], { icon }).addTo(map);
-                                
-                                marker.bindTooltip(stopName, {
-                                    permanent: false,
-                                    direction: 'top',
-                                    offset: [0, -8],
-                                    className: 'stop-tooltip'
-                                });
-                                marker.on('click', () => selectRoute(route.id));
-                                
-                                routePolylines[`${route.id}-stop-${idx}`] = marker;
-                            });
-                            
-                            routePolylines[route.id] = polyline;
-                            if (!visibleLayers.routes) map.removeLayer(polyline);
-                        });
-                    });
-                    
-                    renderRoutesList(routes);
-                })
-                .catch(e => console.error('Error loading routes:', e));
+            fetch('/api/routes').then(r => r.json()).then(routes => {
+                Object.values(routePolylines).forEach(p => map.removeLayer(p)); routePolylines = {}; allRoutes = routes;
+                routes.forEach(route => { getOSRMRoute(route.waypoints).then(routeCoords => { const polyline = L.polyline(routeCoords || route.waypoints, { color: route.color, weight: 4, opacity: 0.8, dashArray: '5, 5' }).addTo(map); polyline.bindPopup(`<b>${route.name}</b>`); polyline.on('click', () => selectRoute(route.id)); route.waypoints.forEach((wp, idx) => { const stopName = (route.stops && route.stops[idx]) || `Stop ${idx + 1}`; const icon = L.divIcon({ className: 'marker-wrapper', html: `<span class="tiny-marker" style="background:${route.color}"></span>`, iconSize:[10,10], iconAnchor:[5,5] }); const marker = L.marker([wp[0], wp[1]], { icon }).addTo(map); marker.bindTooltip(stopName, { direction: 'top', offset: [0, -8] }); marker.on('click', () => selectRoute(route.id)); routePolylines[`${route.id}-stop-${idx}`] = marker; }); routePolylines[route.id] = polyline; if (!visibleLayers.routes) map.removeLayer(polyline); }); }); renderRoutesList(routes); }).catch(e => console.error('Error loading routes:', e));
         }
-        
+
         async function getOSRMRoute(waypoints) {
-            try {
-                if (waypoints.length < 2) return waypoints;
-                
-                // Format: lon,lat;lon,lat...
-                const coords = waypoints.map(wp => `${wp[1]},${wp[0]}`).join(';');
-                const url = `https://router.project-osrm.org/route/v1/driving/${coords}?geometries=geojson`;
-                
-                const res = await fetch(url);
-                const data = await res.json();
-                
-                if (data.routes && data.routes[0]) {
-                    // Convert GeoJSON coords (lon,lat) to Leaflet format (lat,lon)
-                    return data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
-                }
-                return waypoints;
-            } catch(e) {
-                console.error('OSRM error:', e);
-                return waypoints;
-            }
+            try { if (waypoints.length < 2) return waypoints; const coords = waypoints.map(wp => `${wp[1]},${wp[0]}`).join(';'); const url = `https://router.project-osrm.org/route/v1/driving/${coords}?geometries=geojson`; const res = await fetch(url); const data = await res.json(); if (data.routes && data.routes[0]) { return data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]); } return waypoints; } catch(e) { console.error('OSRM error:', e); return waypoints; }
         }
 
-        // Returns {distance: meters, duration: seconds} between two points using OSRM
-        async function getOSRMDuration(fromLatLng, toLatLng) {
-            try {
-                const coords = `${fromLatLng[1]},${fromLatLng[0]};${toLatLng[1]},${toLatLng[0]}`;
-                const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=false`;
-                const res = await fetch(url);
-                const data = await res.json();
-                if (data.routes && data.routes[0]) {
-                    return { distance: data.routes[0].distance, duration: data.routes[0].duration };
-                }
-            } catch (e) {
-                console.error('OSRM duration error:', e);
-            }
-            return null;
-        }
-
-        // Fast OSRM durations for many buses to one stop using Table API
-        async function getOSRMMinDurationToStop(busPoints, stopPoint) {
-            try {
-                if (!busPoints || busPoints.length === 0 || !stopPoint) return null;
-                const points = [...busPoints, stopPoint];
-                const destIndex = points.length - 1;
-                const coords = points.map(p => `${p[1]},${p[0]}`).join(';');
-                const sources = busPoints.map((_, i) => i).join(';');
-                const url = `https://router.project-osrm.org/table/v1/driving/${coords}?sources=${sources}&destinations=${destIndex}`;
-                const res = await fetch(url);
-                const data = await res.json();
-                if (data && data.durations && Array.isArray(data.durations)) {
-                    // durations is [ [toDest], [toDest], ... ] since only one destination
-                    const mins = data.durations
-                        .map(row => row && row.length ? row[0] : Infinity)
-                        .reduce((a, b) => Math.min(a, b), Infinity);
-                    return isFinite(mins) ? mins : null;
-                }
-            } catch (e) {
-                console.error('OSRM table error:', e);
-            }
-            return null;
-        }
+        async function getOSRMDuration(fromLatLng, toLatLng) { try { const coords = `${fromLatLng[1]},${fromLatLng[0]};${toLatLng[1]},${toLatLng[0]}`; const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=false`; const res = await fetch(url); const data = await res.json(); if (data.routes && data.routes[0]) { return { distance: data.routes[0].distance, duration: data.routes[0].duration }; } } catch(e) { console.error('OSRM duration error:', e); } return null; }
+        async function getOSRMMinDurationToStop(busPoints, stopPoint) { try { if (!busPoints || busPoints.length === 0 || !stopPoint) return null; const points = [...busPoints, stopPoint]; const destIndex = points.length - 1; const coords = points.map(p => `${p[1]},${p[0]}`).join(';'); const sources = busPoints.map((_, i) => i).join(';'); const url = `https://router.project-osrm.org/table/v1/driving/${coords}?sources=${sources}&destinations=${destIndex}`; const res = await fetch(url); const data = await res.json(); if (data && data.durations && Array.isArray(data.durations)) { const mins = data.durations.map(row => row && row.length ? row[0] : Infinity).reduce((a, b) => Math.min(a, b), Infinity); return isFinite(mins) ? mins : null; } } catch(e) { console.error('OSRM table error:', e); } return null; }
 
         function renderRoutesList(routes) {
-            const container = document.getElementById('routesContainer');
-            if (routes.length === 0) {
-                container.innerHTML = '<div style="text-align:center; color:#666; font-size:12px">No routes available</div>';
-                return;
-            }
+            const container = document.getElementById('routesContainer'); if (routes.length === 0) { container.innerHTML = '<div style="text-align:center; color:#666; font-size:12px">No routes available</div>'; return; }
             container.innerHTML = '';
             routes.forEach(route => {
-                const item = document.createElement('div');
-                item.className = `route-item ${selectedRouteId === route.id ? 'active' : ''}`;
-                item.style.borderLeftColor = route.color;
-                item.innerHTML = `<strong>${route.name}</strong><br><span style="color:#9aa; font-size:12px">${route.waypoints.length} stops</span>`;
-                item.addEventListener('click', () => selectRoute(route.id));
-                container.appendChild(item);
+                const chip = document.createElement('button');
+                const isActive = String(selectedRouteId) === String(route.id);
+                chip.className = `route-chip ${isActive ? 'active' : ''}`;
+                chip.style.borderColor = route.color;
+                chip.textContent = isActive ? `✓ ${route.name}` : route.name;
+                chip.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                if (isActive) {
+                    chip.style.boxShadow = `0 0 0 2px ${route.color}55`;
+                    chip.style.background = 'rgba(255,255,255,0.08)';
+                }
+                chip.addEventListener('click', () => { selectRoute(route.id); });
+                container.appendChild(chip);
             });
         }
 
         function selectRoute(routeId) {
-            selectedRouteId = selectedRouteId === routeId ? null : routeId;
-            
-            // Update UI
-            document.querySelectorAll('.route-item').forEach(item => {
-                item.classList.remove('active');
-            });
-            if (selectedRouteId) {
-                const route = allRoutes.find(r => r.id === routeId);
-                const index = Array.from(document.getElementById('routesContainer').children).findIndex(
-                    child => child.innerText.includes(route.name)
-                );
-                if (index >= 0) {
-                    document.querySelectorAll('.route-item')[index].classList.add('active');
-                }
-                
-                // Show route details card
-                showRouteDetails(route);
-            } else {
-                // Hide route details card
-                document.getElementById('routeDetailsCard').style.display = 'none';
-                if (walkingLine) {
-                    map.removeLayer(walkingLine);
-                    walkingLine = null;
-                }
-            }
-            
-            // Update map visibility
-            Object.entries(routePolylines).forEach(([id, polyline]) => {
-                if (!id.includes('-stop-')) {
-                    try {
-                        const opacity = selectedRouteId === id ? 1 : 0.3;
-                        polyline.setStyle({ opacity: opacity });
-                    } catch(e) {}
-                }
-            });
-            
+            const newId = String(routeId);
+            selectedRouteId = (selectedRouteId === newId) ? null : newId;
+            Object.entries(routePolylines).forEach(([id, polyline]) => { if (!id.includes('-stop-')) { try { const opacity = selectedRouteId === String(id) ? 1 : 0.3; polyline.setStyle({ opacity }); } catch(e) {} } });
             renderRoutesList(allRoutes);
+            if (selectedRouteId) {
+                const routeObj = getRouteById(routeId);
+                if (routeObj) { showRouteDetails(routeObj); const rEl = document.getElementById('currentRouteOverlay'); if(rEl) rEl.textContent = routeObj.name; computeAndShowStudentETA(); }
+            } else {
+                const card = document.getElementById('routeDetailsCard'); if (card) card.style.display = 'none';
+                const etaOverlay = document.getElementById('etaOverlay'); if (etaOverlay) etaOverlay.textContent = '--';
+                const etaValue = document.getElementById('etaValue'); if (etaValue) etaValue.textContent = '--';
+                const rEl = document.getElementById('currentRouteOverlay'); if(rEl) rEl.textContent = '—';
+                if (walkingLine) { try { map.removeLayer(walkingLine); } catch(e){} walkingLine = null; }
+            }
         }
-        
-        async function showRouteDetails(route) {
-            const card = document.getElementById('routeDetailsCard');
-            card.style.display = 'block';
 
-            // Fetch buses and find those on this route
+        async function showRouteDetails(route) {
+            const card = document.getElementById('routeDetailsCard'); card.style.display = 'block';
             const busesData = await fetch('/api/buses').then(r => r.json()).catch(() => ({}));
             const busesOnRoute = Object.entries(busesData)
-                .filter(([busNum, b]) => b && b.routeId === route.id)
+                .filter(([busNum, b]) => {
+                    const rid = (b && b.routeId != null) ? b.routeId : busRouteMap[busNum];
+                    return rid === route.id;
+                })
                 .map(([busNum]) => busNum);
-
-            const borEl = document.getElementById('busesOnRouteCount');
-            if (borEl) borEl.textContent = busesOnRoute.length;
-
-            let nearestStop = null;
-            let nearestStopIndex = 0;
-            let minDist = Infinity;
-
-            const refLocation = (userLocation && userLocation.length === 2)
-                ? userLocation
-                : (map ? [map.getCenter().lat, map.getCenter().lng] : null);
-
-            if (refLocation && route.waypoints.length > 0) {
-                // Find nearest bus stop
-                route.waypoints.forEach((stop, idx) => {
-                    const dist = calcDistance(refLocation[0], refLocation[1], stop[0], stop[1]);
-                    if (dist < minDist) {
-                        minDist = dist;
-                        nearestStop = stop;
-                        nearestStopIndex = idx;
-                    }
-                });
-
-                if (nearestStop) {
-                    // Show walking distance only if user location is available
-                    if (userLocation) {
-                        const distKm = (minDist / 1000).toFixed(2);
-                        const walkMin = Math.ceil(minDist / 1.4); // ~1.4 m/s walking speed
-                        document.getElementById('walkDistance').textContent = `${distKm} km (${walkMin}m)`;
-
-                        // Draw walking line
-                        if (walkingLine) map.removeLayer(walkingLine);
-                        walkingLine = L.polyline([userLocation, nearestStop], {
-                            color: '#999999',
-                            weight: 2,
-                            opacity: 0.6,
-                            dashArray: '5, 5'
-                        }).addTo(map);
-                    } else {
-                        document.getElementById('walkDistance').textContent = '--';
-                    }
-                }
-            } else {
-                document.getElementById('walkDistance').textContent = '--';
-            }
-
-            // Compute ETA using OSRM (fast table API) from buses on route to nearest stop
-            let etaText = '--';
-            if (busesOnRoute.length > 0 && nearestStop) {
-                try {
-                    const busPoints = busesOnRoute
-                        .map(busNum => busesData[busNum])
-                        .filter(b => b && typeof b.lat === 'number' && typeof b.lng === 'number')
-                        .map(b => [b.lat, b.lng]);
-
-                    let minDurationSec = await getOSRMMinDurationToStop(busPoints, nearestStop);
-                    if (minDurationSec == null) {
-                        // Fallback: single route call for first bus
-                        const first = busPoints[0];
-                        const d = await getOSRMDuration(first, nearestStop);
-                        minDurationSec = d && d.duration ? d.duration : null;
-                    }
-
-                    if (minDurationSec != null) {
-                        const mins = Math.ceil(minDurationSec / 60);
-                        etaText = `${mins}m`;
-                    } else {
-                        // fallback to route length estimate
-                        const avgBusSpeed = 10; // km/h
-                        const routeLength = estimateRouteDistance(route.waypoints);
-                        const etaMinutes = Math.ceil(routeLength / avgBusSpeed * 60);
-                        etaText = etaMinutes > 0 ? `${etaMinutes}m` : '--';
-                    }
-                } catch (e) {
-                    console.error('Error computing OSRM ETA:', e);
-                    etaText = '--';
-                }
-            } else {
-                etaText = '--';
-            }
-
-            document.getElementById('etaValue').textContent = etaText;
+            const borEl = document.getElementById('busesOnRouteCount'); if (borEl) borEl.textContent = busesOnRoute.length;
+            let nearestStop = null; let minDist = Infinity; const refLocation = (userLocation && userLocation.length === 2) ? userLocation : (map ? [map.getCenter().lat, map.getCenter().lng] : null);
+            if (refLocation && route.waypoints.length > 0) { route.waypoints.forEach((stop) => { const dist = calcDistance(refLocation[0], refLocation[1], stop[0], stop[1]); if (dist < minDist) { minDist = dist; nearestStop = stop; } }); if (nearestStop) { if (userLocation) { const distKm = (minDist / 1000).toFixed(2); const walkMin = Math.ceil(minDist / 1.4); document.getElementById('walkDistance').textContent = `${distKm} km (${walkMin}m)`; if (walkingLine) map.removeLayer(walkingLine); walkingLine = L.polyline([userLocation, nearestStop], { color: '#999999', weight: 2, opacity: 0.6, dashArray: '5, 5' }).addTo(map); } else { document.getElementById('walkDistance').textContent = '--'; } } } else { document.getElementById('walkDistance').textContent = '--'; }
+            // ETA computed separately to simplify: distance / speed
+            document.getElementById('etaValue').textContent = '--'; const etaOverlay = document.getElementById('etaOverlay'); if (etaOverlay) etaOverlay.textContent = '--';
+            computeAndShowStudentETA();
         }
-        
-        function estimateRouteDistance(waypoints) {
-            let total = 0;
-            for (let i = 0; i < waypoints.length - 1; i++) {
-                total += calcDistance(waypoints[i][0], waypoints[i][1], waypoints[i+1][0], waypoints[i+1][1]);
-            }
-            return total / 1000; // km
+        function formatMinSec(totalSeconds){
+            const m = Math.floor(totalSeconds/60);
+            const s = totalSeconds % 60;
+            return `${m}:${String(s).padStart(2,'0')}`;
         }
+
+        async function computeAndShowStudentETA(){
+            const etaEl = document.getElementById('etaValue'); const etaOverlay = document.getElementById('etaOverlay'); if(etaEl) etaEl.textContent='--'; if(etaOverlay) etaOverlay.textContent='--';
+            const busesData = await fetch('/api/buses').then(r=>r.json()).catch(()=>({}));
+            const nowMs = Date.now();
+            const freshEntries = Object.entries(busesData).filter(([num,b])=>{ const t = b && b.lastUpdate ? parseIsoTime(b.lastUpdate) : null; return t && (nowMs - t) <= OFFLINE_MS; });
+            const freshData = Object.fromEntries(freshEntries);
+
+            // Determine active route context: tracked bus route first, else selected route
+            let activeRoute = null; let nearestStop = null;
+            let refLocation = (userLocation && userLocation.length === 2) ? userLocation : (map ? [map.getCenter().lat, map.getCenter().lng] : null);
+
+            let chosenBusNum = trackedBus;
+            let chosenBus = chosenBusNum ? freshData[chosenBusNum] : null;
+            let routeId = chosenBus && chosenBus.routeId!=null ? chosenBus.routeId : (chosenBusNum ? busRouteMap[chosenBusNum] : null);
+
+            if(routeId){ activeRoute = getRouteById(routeId); }
+            if(!activeRoute && selectedRouteId){ activeRoute = getRouteById(selectedRouteId); }
+            if(!activeRoute || !activeRoute.waypoints || activeRoute.waypoints.length===0){ return; }
+
+            // Find nearest student stop
+            if(refLocation){ let minD=Infinity; activeRoute.waypoints.forEach(stop=>{ const d = calcDistance(refLocation[0],refLocation[1], stop[0], stop[1]); if(d<minD){ minD=d; nearestStop=stop; } }); }
+            if(!nearestStop){ nearestStop = activeRoute.waypoints[0]; }
+
+            // Choose bus: if not tracked, pick bus on route nearest to that stop
+            if(!chosenBusNum){
+                const busesOnRoute = Object.entries(freshData).filter(([num,b])=>{ const rid = (b && b.routeId!=null) ? b.routeId : busRouteMap[num]; return rid === activeRoute.id; });
+                if(busesOnRoute.length===0){ return; }
+                let bestNum=null, bestB=null, bestDist=Infinity;
+                for(const [num,b] of busesOnRoute){ if(!b || typeof b.lat!=='number' || typeof b.lng!=='number') continue; const d = calcDistance(b.lat,b.lng, nearestStop[0], nearestStop[1]); if(d<bestDist){ bestDist=d; bestNum=num; bestB=b; } }
+                chosenBusNum = bestNum; chosenBus = bestB;
+                if(!chosenBus){ return; }
+            }
+
+            // Compute speed and ETA, with avg speed fallback and At Stop indication
+            const speedKmh = computeSpeed(chosenBusNum, [chosenBus.lat, chosenBus.lng], chosenBus.lastUpdate);
+            const distMeters = calcDistance(chosenBus.lat, chosenBus.lng, nearestStop[0], nearestStop[1]);
+            const atStopThreshold = 15; // meters
+            const avgSpeed = 25; // km/h
+            let displayText = '--';
+            let speedFrag = '';
+            let speedTitle = '';
+
+            if (distMeters <= atStopThreshold) {
+                // At stop: show only 'At Stop' (no assumed speed)
+                displayText = 'At Stop';
+                speedFrag = '';
+                speedTitle = '';
+            } else if (speedKmh && speedKmh > 0.1) {
+                const seconds = Math.ceil(((distMeters/1000) / speedKmh) * 3600);
+                displayText = formatMinSec(seconds);
+                speedFrag = ` • ${speedKmh} km/h`;
+                speedTitle = '';
+            } else {
+                // Fallback to average speed when bus speed is unavailable
+                const seconds = Math.ceil(((distMeters/1000) / avgSpeed) * 3600);
+                displayText = formatMinSec(seconds);
+                // Show 'At Stop' to the side of ETA when speed is 0/unavailable
+                speedFrag = ' • At Stop';
+                speedTitle = '(approximate)';
+            }
+
+            const overlayHtml = speedTitle ? `<span title="${speedTitle}">${displayText}</span>${speedFrag}` : `${displayText}${speedFrag}`;
+            if (etaEl) etaEl.innerHTML = overlayHtml;
+            if (etaOverlay) etaOverlay.innerHTML = overlayHtml;
+        }
+
+        function estimateRouteDistance(waypoints) { let total = 0; for (let i = 0; i < waypoints.length - 1; i++) { total += calcDistance(waypoints[i][0], waypoints[i][1], waypoints[i+1][0], waypoints[i+1][1]); } return total / 1000; }
 
         function setTrackedBus(busNum) {
             trackedBus = busNum || null;
-            const select = document.getElementById('trackBusSelect');
-            if (select.value !== (busNum || '')) select.value = busNum || '';
-            // update marker visuals
-            Object.keys(busMarkers).forEach(num => {
-                const marker = busMarkers[num];
-                const isTracked = trackedBus && num === trackedBus;
-                // fade others
-                try { marker.setOpacity(isTracked ? 1 : 0.2); } catch(e) {}
-                // change size for tracked
-                const color = colors[(parseInt(num) - 1) % colors.length];
-                const newIcon = createIcon(num, color, isTracked ? 70 : 40);
-                marker.setIcon(newIcon);
-            });
+            Object.keys(busMarkers).forEach(num => { const marker = busMarkers[num]; const isTracked = trackedBus && num === trackedBus; const busData = marker && marker._popup && marker._popup._source ? null : null; try { marker.setOpacity(isTracked ? 1 : 0.6); } catch(e) {} const color = colors[(parseInt(num) - 1) % colors.length]; const rid = busRouteMap[num]; const onSelectedRoute = selectedRouteId && String(rid) === String(selectedRouteId); const newIcon = createIcon(num, color, onSelectedRoute ? 26 : 24, prevBusRotation[num] || 0, isTracked || onSelectedRoute); marker.setIcon(newIcon); prevTrackedState[num] = !!isTracked; prevRouteSelState[num] = !!onSelectedRoute; });
+            const rid = busRouteMap[busNum]; if (rid) { selectRoute(rid); const routeObj = getRouteById(rid); if(routeObj) showRouteDetails(routeObj); }
+            computeAndShowStudentETA();
         }
 
         function initMap() {
             const bounds = [[20.339920625677212, 85.7964659296332], [20.37210882553945, 85.83388810783698]];
             map = L.map('map', { zoomControl: true, maxBounds: bounds, minZoom: 14 }).setView([20.3549, 85.8161], 15);
-
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; CARTO',
-                maxZoom: 19
-            }).addTo(map);
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
-                attribution: '',
-                maxZoom: 19
-            }).addTo(map);
-
-            updateBuses();
-            setInterval(updateBuses, 3000);
-
-            // Load initial location data
-            loadHostels();
-            loadClasses();
-            loadRoutes();
-            loadBusRoutes();
-
-            // populate track select (1..20)
-            const sel = document.getElementById('trackBusSelect');
-            for (let i = 1; i <= 20; i++) {
-                const opt = document.createElement('option');
-                opt.value = String(i);
-                opt.textContent = `Bus ${i}`;
-                sel.appendChild(opt);
-            }
-
-            sel.addEventListener('change', () => {
-                const val = sel.value;
-                setTrackedBus(val || null);
-            });
-
-            document.getElementById('followCheckbox').addEventListener('change', (e) => {
-                followEnabled = e.target.checked;
-            });
-
-            // Add layer toggle listeners
-            document.getElementById('hostelsToggle').addEventListener('change', (e) => {
-                updateLayerVisibility('hostels', e.target.checked);
-            });
-
-            document.getElementById('classesToggle').addEventListener('change', (e) => {
-                updateLayerVisibility('classes', e.target.checked);
-            });
-
-            document.getElementById('routesToggle').addEventListener('change', (e) => {
-                updateLayerVisibility('routes', e.target.checked);
-            });
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', { attribution: '&copy; CARTO', maxZoom: 19 }).addTo(map);
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { attribution: '', maxZoom: 19 }).addTo(map);
+            if(userLocation){ updateUserMarker(userLocation); }
+            updateBuses(); setInterval(updateBuses, 3000);
+            loadHostels(); loadClasses(); loadRoutes(); loadBusRoutes();
+            document.getElementById('hostelsToggle').addEventListener('change', (e) => { updateLayerVisibility('hostels', e.target.checked); });
+            document.getElementById('classesToggle').addEventListener('change', (e) => { updateLayerVisibility('classes', e.target.checked); });
+            document.getElementById('routesToggle').addEventListener('change', (e) => { updateLayerVisibility('routes', e.target.checked); });
         }
 
         function updateBuses() {
-            fetch('/api/buses')
-                .then(response => response.json())
-                .then(buses => {
-                    const busNumbers = Object.keys(buses);
-                    const activeCountEl = document.getElementById('activeBusCount');
-                    if (activeCountEl) activeCountEl.textContent = busNumbers.length;
-
-                    const existingBuses = Object.keys(busMarkers);
-                    existingBuses.forEach(busNum => {
-                        if (!busNumbers.includes(busNum)) {
-                            map.removeLayer(busMarkers[busNum]);
-                            delete busMarkers[busNum];
-                        }
-                    });
-
-                    busNumbers.forEach(busNum => {
-                        const bus = buses[busNum];
-                        const position = [bus.lat, bus.lng];
-                        const color = colors[(parseInt(busNum) - 1) % colors.length];
-                        
-                        let rotation = 0;
-                        if (prevBusPositions[busNum]) {
-                            rotation = calcBearing(prevBusPositions[busNum], position);
-                        }
-                        prevBusPositions[busNum] = position;
-
-                        if (busMarkers[busNum]) {
-                            busMarkers[busNum].setLatLng(position);
-                            const isTracked = trackedBus && busNum === trackedBus;
-                            const newIcon = createIcon(busNum, color, isTracked ? 70 : 40, rotation);
+            fetch('/api/buses').then(response => response.json()).then(buses => {
+                const nowMs = Date.now();
+                const busNumbers = Object.keys(buses);
+                // Only keep buses fresh within OFFLINE_MS
+                const freshBusNumbers = busNumbers.filter(n => {
+                    const iso = buses[n] && buses[n].lastUpdate; const t = iso ? parseIsoTime(iso) : null; return t && (nowMs - t) <= OFFLINE_MS;
+                });
+                const activeCountEl = document.getElementById('activeBusCount'); if (activeCountEl) activeCountEl.textContent = freshBusNumbers.length;
+                const activeCountOverlay = document.getElementById('activeCountOverlay'); if (activeCountOverlay) activeCountOverlay.textContent = freshBusNumbers.length;
+                // Remove markers for buses missing or stale
+                const existingBuses = Object.keys(busMarkers);
+                existingBuses.forEach(busNum => { if (!freshBusNumbers.includes(busNum)) { map.removeLayer(busMarkers[busNum]); delete busMarkers[busNum]; } });
+                freshBusNumbers.forEach(busNum => {
+                    const bus = buses[busNum]; const position = [bus.lat, bus.lng]; const color = colors[(parseInt(busNum) - 1) % colors.length];
+                    let rotation = 0; if (prevBusPositions[busNum]) { rotation = calcBearing(prevBusPositions[busNum], position); }
+                    const isTracked = trackedBus && busNum === trackedBus;
+                    prevBusPositions[busNum] = position; if (bus.lastUpdate) prevBusTimes[busNum] = parseIsoTime(bus.lastUpdate);
+                    if (busMarkers[busNum]) {
+                        busMarkers[busNum].setLatLng(position);
+                        const rid = (bus && bus.routeId != null) ? bus.routeId : busRouteMap[busNum];
+                        const onSelectedRoute = selectedRouteId && String(rid) === String(selectedRouteId);
+                        const rotationChanged = (prevBusRotation[busNum] === undefined) || (Math.abs(rotation - prevBusRotation[busNum]) > 5);
+                        const trackingChanged = prevTrackedState[busNum] !== !!isTracked;
+                        const routeSelChanged = prevRouteSelState[busNum] !== !!onSelectedRoute;
+                        if (rotationChanged || trackingChanged || routeSelChanged) {
+                            const newIcon = createIcon(busNum, color, onSelectedRoute ? 26 : 24, rotation, isTracked || onSelectedRoute);
                             busMarkers[busNum].setIcon(newIcon);
-                        } else {
-                            // size depends on whether this is tracked
-                            const isTracked = trackedBus && busNum === trackedBus;
-                            const icon = createIcon(busNum, color, isTracked ? 70 : 40, rotation);
-                            busMarkers[busNum] = L.marker(position, { icon: icon, title: `Bus ${busNum}` }).addTo(map);
-                            busMarkers[busNum].on('click', () => {
-                                setTrackedBus(busNum);
-                                if (followEnabled) map.setView(position, 17);
-                            });
-                            // Pause follow while hovering the bus marker
-                            busMarkers[busNum].on('mouseover', () => { followEnabled = false; });
-                            busMarkers[busNum].on('mouseout', () => { followEnabled = document.getElementById('followCheckbox').checked; });
+                            prevBusRotation[busNum] = rotation;
+                            prevTrackedState[busNum] = !!isTracked;
+                            prevRouteSelState[busNum] = !!onSelectedRoute;
                         }
-
-                        // apply fading and follow when updating
-                        const marker = busMarkers[busNum];
-                        const isTrackedNow = trackedBus && busNum === trackedBus;
-                        try { marker.setOpacity(isTrackedNow ? 1 : 0.2); } catch(e) {}
-                        if (isTrackedNow && followEnabled) {
-                            map.panTo(position);
-                        }
-                    });
-
-                    updateActiveBusList(busNumbers, buses);
-                    const now = new Date().toLocaleTimeString();
-                    document.getElementById('lastUpdate').textContent = now;
-                })
-                .catch(error => console.error('Error:', error));
+                    } else {
+                        const rid = (bus && bus.routeId != null) ? bus.routeId : busRouteMap[busNum];
+                        const onSelectedRoute = selectedRouteId && String(rid) === String(selectedRouteId);
+                        const icon = createIcon(busNum, color, onSelectedRoute ? 26 : 24, rotation, isTracked || onSelectedRoute);
+                        busMarkers[busNum] = L.marker(position, { icon: icon, title: `Bus ${busNum}` }).addTo(map);
+                        prevBusRotation[busNum] = rotation;
+                        prevTrackedState[busNum] = !!isTracked;
+                        prevRouteSelState[busNum] = !!onSelectedRoute;
+                        busMarkers[busNum].bindPopup(() => buildBusPopup(busNum, bus));
+                        busMarkers[busNum].on('click', () => { setTrackedBus(busNum); if (followEnabled) map.setView(position, 17); busMarkers[busNum].openPopup(); });
+                        busMarkers[busNum].on('mouseover', () => { followEnabled = false; }); busMarkers[busNum].on('mouseout', () => { followEnabled = true; });
+                    }
+                    const marker = busMarkers[busNum]; const isTrackedNow = trackedBus && busNum === trackedBus; try { marker.setOpacity(isTrackedNow ? 1 : 0.6); } catch(e) {} if (isTrackedNow && followEnabled) { map.panTo(position); }
+                });
+                updateActiveBusList(freshBusNumbers, buses);
+                computeAndShowStudentETA();
+                const now = new Date().toLocaleTimeString(); const luSidebar = document.getElementById('lastUpdate'); if (luSidebar) luSidebar.textContent = now; const luOverlay = document.getElementById('lastUpdateOverlay'); if (luOverlay) luOverlay.textContent = now;
+            }).catch(error => console.error('Error:', error));
         }
 
         function updateActiveBusList(busNumbers, buses) {
-            const container = document.getElementById('activeBuses');
-            
-            if (busNumbers.length === 0) {
-                container.innerHTML = `
-                    <div class="empty-state">
-                        <svg fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/>
-                            <path d="M3 4a1 1 0 00-1 1v10a1 1 0 001 1h1.05a2.5 2.5 0 014.9 0H10a1 1 0 001-1V5a1 1 0 00-1-1H3zM14 7a1 1 0 00-1 1v6.05A2.5 2.5 0 0115.95 16H17a1 1 0 001-1v-5a1 1 0 00-.293-.707l-2-2A1 1 0 0015 7h-1z"/>
-                        </svg>
-                        <p>No buses currently active</p>
-                    </div>
-                `;
-                return;
-            }
-
+            const container = document.getElementById('activeBuses'); if (busNumbers.length === 0) { container.innerHTML = `<div class="empty-state"><p>No buses currently active</p></div>`; return; }
             container.innerHTML = '';
             busNumbers.sort((a, b) => parseInt(a) - parseInt(b));
-
             busNumbers.forEach(busNum => {
                 const color = colors[(parseInt(busNum) - 1) % colors.length];
+                const rid = (buses[busNum] && buses[busNum].routeId != null) ? buses[busNum].routeId : busRouteMap[busNum];
+                const onSelectedRoute = selectedRouteId && String(rid) === String(selectedRouteId);
                 const item = document.createElement('div');
-                item.className = 'bus-item';
+                item.className = `bus-item ${onSelectedRoute ? 'active-route' : ''}`;
                 item.style.borderLeftColor = color;
-                item.onclick = () => {
-                    const position = [buses[busNum].lat, buses[busNum].lng];
-                    map.setView(position, 17);
-                };
-                item.innerHTML = `
-                    <div class="bus-info">
-                        <div class="bus-dot" style="background-color: ${color};">${busNum}</div>
-                        <div class="bus-name">Bus ${busNum}</div>
-                    </div>
-                    <div class="bus-status">
-                        <div class="pulse"></div>
-                        Active
-                    </div>
-                `;
+                item.onclick = () => { const position = [buses[busNum].lat, buses[busNum].lng]; map.setView(position, 17); };
+                const status = determineStatus(busNum, [buses[busNum].lat, buses[busNum].lng], buses[busNum].lastUpdate);
+                item.innerHTML = `<div class="bus-info"><div class="bus-dot" style="background-color: ${color}; transform:${onSelectedRoute ? 'scale(1.08)' : 'scale(1)'}">${busNum}</div><div class="bus-name">Bus ${busNum}</div></div><div class="bus-status"><div class="pulse"></div>${status}</div>`;
                 container.appendChild(item);
             });
         }
 
+        async function locateMe() {
+            if (!navigator.geolocation) return alert('Geolocation not supported');
+            navigator.geolocation.getCurrentPosition((pos) => {
+                userLocation = [pos.coords.latitude, pos.coords.longitude]; map.setView(userLocation, 16);
+                updateUserMarker(userLocation);
+                let best = { route: null, stop: null, dist: Infinity };
+                allRoutes.forEach(route => { route.waypoints.forEach((wp) => { const d = calcDistance(userLocation[0], userLocation[1], wp[0], wp[1]); if (d < best.dist) best = { route, stop: wp, dist: d }; }); });
+                if (best.route) { selectRoute(best.route.id); if (walkingLine) map.removeLayer(walkingLine); walkingLine = L.polyline([userLocation, best.stop], { color:'#999', weight:2, opacity:0.7, dashArray:'5,5' }).addTo(map); showRouteDetails(best.route); computeAndShowStudentETA(); }
+                if(!userWatchId){
+                    userWatchId = navigator.geolocation.watchPosition((p)=>{
+                        userLocation = [p.coords.latitude, p.coords.longitude];
+                        updateUserMarker(userLocation);
+                    }, ()=>{}, { enableHighAccuracy:true, maximumAge:8000, timeout:12000 });
+                }
+            }, () => alert('Unable to get location'));
+        }
+
+        document.addEventListener('DOMContentLoaded', () => { const btn = document.getElementById('locateMeBtn'); if (btn) btn.addEventListener('click', locateMe); });
         window.addEventListener('load', initMap);
     </script>
-
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </body>
 </html>

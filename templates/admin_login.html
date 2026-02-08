@@ -36,22 +36,50 @@
             <input name="username" placeholder="admin" required>
 
             <label>Password</label>
-            <input name="password" type="password" placeholder="Enter password" required>
+            <div style="display:flex; gap:8px; align-items:center">
+                <input id="loginPassword" name="password" type="password" placeholder="Enter password" required style="flex:1">
+                <button type="button" onclick="toggleVisibility('loginPassword', this)" style="margin-top:0;background:#667eea;color:#fff">Show</button>
+            </div>
 
             <div id="signup-fields" style="display: none;">
                 <label>6-digit Signup Pin</label>
-                <input name="signup_pin" type="password" maxlength="6" placeholder="Enter 6-digit pin">
+                <div style="display:flex; gap:8px; align-items:center">
+                    <input id="signupPin" name="signup_pin" type="password" maxlength="6" placeholder="Enter 6-digit pin" style="flex:1">
+                    <button type="button" onclick="toggleVisibility('signupPin', this)" style="margin-top:0;background:#667eea;color:#fff">Show</button>
+                </div>
             </div>
-
-            <button type="submit" name="action" value="login">Login</button>
-            <button type="button" onclick="showSignupFields();">Signup</button>
-            <button type="submit" name="action" value="signup" id="createBtn" style="display:none;">Create Account</button>
+            <input type="hidden" name="action" id="actionField" value="login">
+            <button type="button" onclick="submitLogin()">Login</button>
+            <button type="button" id="createBtn" onclick="submitSignup()">Create Account</button>
         </form>
         <script>
-        function showSignupFields() {
-            document.getElementById('signup-fields').style.display = 'block';
-            var btn = document.getElementById('createBtn');
-            if (btn) btn.style.display = 'inline-block';
+        function toggleVisibility(inputId, btn){
+            const el = document.getElementById(inputId);
+            if(!el) return;
+            const isPwd = el.type === 'password';
+            el.type = isPwd ? 'text' : 'password';
+            if(btn) btn.textContent = isPwd ? 'Hide' : 'Show';
+        }
+        function submitLogin(){
+            document.getElementById('actionField').value = 'login';
+            document.querySelector('form').submit();
+        }
+        function submitSignup(){
+            const fields = document.getElementById('signup-fields');
+            const pinInput = document.getElementById('signupPin');
+            // First click: reveal pin field
+            if(fields.style.display === 'none'){
+                fields.style.display = 'block';
+                return;
+            }
+            // Require pin before submitting
+            if(!pinInput || !pinInput.value.trim()){
+                alert('Enter the 6-digit signup pin');
+                pinInput && pinInput.focus();
+                return;
+            }
+            document.getElementById('actionField').value = 'signup';
+            document.querySelector('form').submit();
         }
         </script>
 
