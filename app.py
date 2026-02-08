@@ -14,6 +14,8 @@ except Exception:
     FIDO2_AVAILABLE = False
 
 app = Flask(__name__)
+app.config['WTF_CSRF_ENABLED'] = False
+
 app.secret_key = os.environ.get('FLASK_SECRET', 'dev-secret-change-this')
 
 BUSES_FILE = 'buses_location.json'
