@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Bus Simulator</title>
+
+<link
+  rel="stylesheet"
+  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+/>
+
+<style>
+body { margin:0; background:#0f0f23; color:white; font-family:sans-serif; }
+#map { height:100vh; }
+
+.controls {
+  position:absolute;
+  top:12px;
+  left:12px;
+  background:#1a1a2e;
+  padding:10px;
+  border-radius:8px;
+  z-index:1000;
+}
+</style>
+</head>
+<body>
+
+<div class="controls">
+Bus:
+<select id="busSelect"></select>
+Route:
+<select id="routeSelect"></select>
+<div>Use WASD to drive</div>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+let lat = 20.3549;
+let lng = 85.8161;
+let bus = 1;
+
+let velocityLat = 0;
+let velocityLng = 0;
+
+// Slightly higher speed and smoother inertia
+const accel = 0.0000012; // increased ~3x
+const friction = 0.97;   // retains momentum more
+
+const map = L.map("map").setView([lat, lng], 16);
+
+// Dark mode basemap
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { maxZoom:19, attribution:'' }).addTo(map);
+
+const marker = L.marker([lat, lng]).addTo(map);
+
+function loadBusOptions() {
+  const select = document.getElementById("busSelect");
+  for (let i=1;i<=20;i++) {
+    const o=document.createElement("option");
+    o.value=i;
+    o.text="Bus "+i;
+    select.appendChild(o);
+  }
+  select.onchange=()=>bus=select.value;
+}
+
+async function loadRoutes() {
+  const res = await fetch("/api/routes");
+  const routes = await res.json();
+  const select = document.getElementById("routeSelect");
+
+  routes.forEach(r=>{
+    const o=document.createElement("option");
+    o.value=r.id;
+    o.text=r.name;
+    select.appendChild(o);
+  });
+
+  select.onchange=()=>{
+    fetch(`/api/bus/${bus}/route`,{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({routeId:select.value})
+    });
+  };
+}
+
+loadBusOptions();
+loadRoutes();
+
+navigator.geolocation.getCurrentPosition((pos) => {
+  lat = pos.coords.latitude;
+  lng = pos.coords.longitude;
+  map.setView([lat,lng],16);
+  marker.setLatLng([lat,lng]);
+});
+
+const keys = {};
+document.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
+document.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+
+// Smooth animation with requestAnimationFrame and throttled network updates
+let lastFrame = performance.now();
+let lastSent = 0;
+const SEND_MS = 300; // throttle network updates
+
+function animate() {
+  const now = performance.now();
+  const dt = Math.max(0.016, (now - lastFrame) / 1000); // seconds
+  lastFrame = now;
+
+  // Acceleration based on input
+  if (keys["w"]) velocityLat += accel;
+  if (keys["s"]) velocityLat -= accel;
+  if (keys["a"]) velocityLng -= accel;
+  if (keys["d"]) velocityLng += accel;
+
+  // Apply friction smoothly
+  velocityLat *= friction;
+  velocityLng *= friction;
+
+  // Integrate position
+  lat += velocityLat;
+  lng += velocityLng;
+
+  // Update marker smoothly
+  marker.setLatLng([lat,lng]);
+
+  // Soft-follow: only pan if near edges
+  try {
+    const pix = map.latLngToContainerPoint([lat,lng]);
+    const size = map.getSize();
+    const margin = 36;
+    if (pix.x < margin || pix.x > size.x - margin || pix.y < margin || pix.y > size.y - margin) {
+      map.panTo([lat,lng], { animate: true });
+    }
+  } catch(e) {}
+
+  // Throttled server updates for smoothness
+  if (now - lastSent >= SEND_MS) {
+    lastSent = now;
+    fetch(`/api/bus/${bus}`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ lat, lng, lastUpdate: new Date().toISOString(), routeId: null })
+    }).catch(()=>{});
+  }
+
+  requestAnimationFrame(animate);
+}
+
+requestAnimationFrame(animate);
+</script>
+
+</body>
+</html>
