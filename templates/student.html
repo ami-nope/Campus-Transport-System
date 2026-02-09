@@ -9,46 +9,90 @@
     <link rel="preconnect" href="https://c.basemaps.cartocdn.com" crossorigin/>
     <link rel="preconnect" href="https://d.basemaps.cartocdn.com" crossorigin/>
     <style>
+        :root {
+            --bg: #07070a;
+            --bg-gradient1: rgba(99,102,241,0.12);
+            --bg-gradient2: rgba(236,72,153,0.10);
+            --text: #e6eef8;
+            --text-sub: #9aa4b2;
+            --text-heading: #dbeafe;
+            --card-bg: rgba(18, 24, 38, 0.55);
+            --card-border: rgba(255,255,255,0.06);
+            --card-shadow: rgba(0,0,0,0.45);
+            --stat-bg: rgba(255,255,255,0.06);
+            --stat-border: rgba(255,255,255,0.18);
+            --stat-gradient: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.03));
+            --stat-inner: rgba(255,255,255,0.08);
+            --input-bg: #0f0f23;
+            --input-border: rgba(255,255,255,0.1);
+            --chip-border: rgba(255,255,255,0.18);
+            --chip-gradient: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02));
+            --chip-shadow: 0 4px 16px rgba(0,0,0,0.30), inset 0 0 0 1px rgba(255,255,255,0.06);
+            --map-border: rgba(255,255,255,0.06);
+            --map-bg: #05060a;
+        }
+        body.light-mode {
+            --bg: #f0f2f5;
+            --bg-gradient1: rgba(99,102,241,0.06);
+            --bg-gradient2: rgba(236,72,153,0.05);
+            --text: #1a1a2e;
+            --text-sub: #555e6e;
+            --text-heading: #1e293b;
+            --card-bg: rgba(255, 255, 255, 0.85);
+            --card-border: rgba(0,0,0,0.08);
+            --card-shadow: rgba(0,0,0,0.10);
+            --stat-bg: rgba(0,0,0,0.03);
+            --stat-border: rgba(0,0,0,0.10);
+            --stat-gradient: linear-gradient(180deg, rgba(255,255,255,0.9), rgba(255,255,255,0.5));
+            --stat-inner: rgba(0,0,0,0.04);
+            --input-bg: #fff;
+            --input-border: rgba(0,0,0,0.12);
+            --chip-border: rgba(0,0,0,0.12);
+            --chip-gradient: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(240,242,245,0.8));
+            --chip-shadow: 0 2px 8px rgba(0,0,0,0.08), inset 0 0 0 1px rgba(0,0,0,0.04);
+            --map-border: rgba(0,0,0,0.10);
+            --map-bg: #e8e8e8;
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #07070a; color: #e6eef8; min-height: 100vh; background-image:
-            radial-gradient(circle at 20% 20%, rgba(99,102,241,0.12), transparent 40%),
-            radial-gradient(circle at 80% 30%, rgba(236,72,153,0.10), transparent 40%);
-            background-attachment: fixed; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; background-image:
+            radial-gradient(circle at 20% 20%, var(--bg-gradient1), transparent 40%),
+            radial-gradient(circle at 80% 30%, var(--bg-gradient2), transparent 40%);
+            background-attachment: fixed; transition: background 0.3s, color 0.3s; }
 
         .header { background: transparent; padding: 18px 12px; text-align: left; display:flex; align-items:center; justify-content:space-between; gap:12px }
-        .header h1 { font-size: 20px; color: #e6eef8; margin-bottom: 4px; }
-        .header p { color: #9aa4b2; font-size: 13px; margin-top: 2px }
+        .header h1 { font-size: 20px; color: var(--text); margin-bottom: 4px; }
+        .header p { color: var(--text-sub); font-size: 13px; margin-top: 2px }
         .icon { display:inline-block; font-size:16px; line-height:1; vertical-align:middle; opacity:0.9; margin-right:6px }
 
         .main-container { display:flex; gap:18px; max-width:1200px; margin: 12px auto; padding: 0 12px; }
         .sidebar { flex:1; min-width:260px; max-width:360px; }
         .map-container { flex:1.5; min-height:0; position: relative; }
 
-        #map { height: 500px; border-radius: 16px; border: 2px solid rgba(255,255,255,0.06); box-shadow: 0 8px 28px rgba(0,0,0,0.45); background: #05060a; }
+        #map { height: 500px; border-radius: 16px; border: 2px solid var(--map-border); box-shadow: 0 8px 28px var(--card-shadow); background: var(--map-bg); }
 
-        .card { background: rgba(18, 24, 38, 0.55); border-radius: 16px; padding: 12px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.06); backdrop-filter: blur(18px) saturate(140%); box-shadow: 0 8px 28px rgba(0,0,0,0.45); transition: all 0.25s ease; }
-        .card h3 { color: #dbeafe; font-size:15px; margin-bottom:10px }
+        .card { background: var(--card-bg); border-radius: 16px; padding: 12px; margin-bottom: 12px; border: 1px solid var(--card-border); backdrop-filter: blur(18px) saturate(140%); box-shadow: 0 8px 28px var(--card-shadow); transition: all 0.25s ease; }
+        .card h3 { color: var(--text-heading); font-size:15px; margin-bottom:10px }
 
         .stats-grid { display:grid; grid-template-columns: 1fr 1fr; gap:8px }
-        .stat-box { background: rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); border-radius: 8px; padding:8px; text-align:center }
+        .stat-box { background: var(--stat-bg); border:1px solid rgba(255,255,255,0.05); border-radius: 8px; padding:8px; text-align:center }
 
-        .empty-state { color: #7c8898; padding:16px; font-size:12px }
-        .stat-number { font-size:18px; color:#cbd5e1 }
-        .stat-label { font-size:11px; color:#9aa4b2 }
+        .empty-state { color: var(--text-sub); padding:16px; font-size:12px }
+        .stat-number { font-size:18px; color: var(--text) }
+        .stat-label { font-size:11px; color: var(--text-sub) }
 
         /* Map overlays */
         .map-overlay { position:absolute; top:8px; left:8px; display:flex; gap:8px; z-index:500; }
         .overlay-pill { background: rgba(18, 24, 38, 0.55); border:1px solid rgba(255,255,255,0.06); color:#e6eef8; padding:8px 12px; border-radius:16px; font-size:12px; backdrop-filter: blur(18px) saturate(140%); box-shadow: 0 8px 28px rgba(0,0,0,0.45); transition: all 0.25s ease }
         .info-strip { position:absolute; top:8px; left:8px; right:8px; display:flex; gap:8px; flex-wrap:wrap; z-index:600 }
-        .info-item { background: rgba(18, 24, 38, 0.55); border:1px solid rgba(255,255,255,0.06); color:#e6eef8; padding:8px 12px; border-radius:16px; font-size:12px; backdrop-filter: blur(18px) saturate(140%); box-shadow: 0 8px 28px rgba(0,0,0,0.45); transition: all 0.25s ease }
-        .info-label { color:#9aa4b2; margin-right:6px }
+        .info-item { background: var(--card-bg); border:1px solid var(--card-border); color: var(--text); padding:8px 12px; border-radius:16px; font-size:12px; backdrop-filter: blur(18px) saturate(140%); box-shadow: 0 8px 28px var(--card-shadow); transition: all 0.25s ease }
+        .info-label { color: var(--text-sub); margin-right:6px }
         .info-eta { background: rgba(23,32,54,0.32); border-color:#304b8a; color:#cfe3ff; font-weight:600 }
         .overlay-right { position:absolute; top:8px; right:8px; z-index:500 }
         .eta-pill { background:#172036; border-color:#304b8a; color:#cfe3ff; font-weight:600 }
 
         /* Route chips */
         .route-chips { display:flex; flex-wrap:wrap; gap:8px }
-        .route-chip { padding:8px 12px; border-radius:999px; font-size:12px; border:1px solid rgba(255,255,255,0.06); cursor:pointer; background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0)); color:#e6eef8; transition: all 0.25s ease }
+        .route-chip { padding:8px 12px; border-radius:999px; font-size:12px; border:1px solid var(--chip-border); cursor:pointer; background: var(--chip-gradient); color: var(--text); transition: all 0.25s ease }
         .route-chip.active { background: rgba(255,255,255,0.08); box-shadow: 0 0 0 2px rgba(255,255,255,0.12) }
             /* Glossy buttons */
             #locateMeBtn { background: linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0)) !important; border:1px solid rgba(255,255,255,0.06) !important; border-radius:16px !important; box-shadow: 0 8px 28px rgba(0,0,0,0.45); transition: all 0.25s ease }
@@ -71,7 +115,7 @@
         /* Layer control */
         .layer-control { display:flex; gap:8px; flex-wrap:wrap }
         .toggle-item { display:flex; align-items:center; gap:8px; background: rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06); padding:6px 8px; border-radius:8px }
-        .toggle-label { font-size:12px; color:#e6eef8 }
+        .toggle-label { font-size:12px; color: var(--text) }
         .layer-icon { width:16px; height:8px; border-radius:999px; display:inline-block; border:1px solid rgba(255,255,255,0.2) }
 
         /* Status pulse dot */
@@ -89,23 +133,23 @@
 
         
         .stat-box {
-            background: rgba(255,255,255,0.06);
-            border: 1px solid rgba(255,255,255,0.18);
-            background-image: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.03));
+            background: var(--stat-bg);
+            border: 1px solid var(--stat-border);
+            background-image: var(--stat-gradient);
             backdrop-filter: blur(16px) saturate(140%);
-            box-shadow: 0 6px 20px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.08);
+            box-shadow: 0 6px 20px var(--card-shadow), inset 0 0 0 1px var(--stat-inner);
         }
         .info-item,
         .overlay-pill {
-            border: 1px solid rgba(255,255,255,0.18);
+            border: 1px solid var(--stat-border);
             background-image: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02));
             backdrop-filter: blur(16px) saturate(140%);
-            box-shadow: 0 6px 20px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.06);
+            box-shadow: 0 6px 20px var(--card-shadow), inset 0 0 0 1px var(--stat-inner);
         }
         .route-chip {
-            border-color: rgba(255,255,255,0.18);
-            background-image: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02));
-            box-shadow: 0 4px 16px rgba(0,0,0,0.30), inset 0 0 0 1px rgba(255,255,255,0.06);
+            border-color: var(--chip-border);
+            background-image: var(--chip-gradient);
+            box-shadow: var(--chip-shadow);
         }
         /* Blur non-selected route stops */
         .marker-wrapper.stop-blur {
@@ -113,6 +157,11 @@
             opacity: 0.6;
             transition: filter 150ms ease, opacity 150ms ease;
         }
+        /* Theme toggle buttons */
+        .theme-btn { padding:8px 10px; border-radius:10px; border:1px solid var(--input-border); background: var(--card-bg); color: var(--text); cursor:pointer; font-size:14px; line-height:1; transition: all 0.2s; backdrop-filter:blur(8px); }
+        .theme-btn:hover { opacity:0.85; }
+        .map-theme-btn { position:absolute; bottom:12px; right:12px; z-index:600; padding:7px 9px; border-radius:8px; border:1px solid rgba(255,255,255,0.15); background:rgba(18,24,38,0.8); color:#e6eef8; cursor:pointer; font-size:14px; line-height:1; backdrop-filter:blur(8px); transition:all 0.2s; box-shadow:0 2px 8px rgba(0,0,0,0.3); }
+        .map-theme-btn:hover { opacity:0.85; }
     </style>
 </head>
 <body>
@@ -122,8 +171,9 @@
             <p>Powered by KIIT Transport Live tracking</p>
         </div>
         <div style="display:flex;align-items:center;gap:10px">
+            <button id="globalThemeBtn" class="theme-btn" onclick="toggleGlobalTheme()" title="Toggle light/dark mode">🌙</button>
             <a href="/admin/login" target="_blank" rel="noopener noreferrer" style="color:#666;font-size:11px;text-decoration:none">Admin</a>
-            <button id="locateMeBtn" style="padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:#0f0f23;color:#e6eef8;cursor:pointer">📍 Locate me</button>
+            <button id="locateMeBtn" style="padding:10px 12px;border-radius:10px;border:1px solid var(--input-border);background:var(--input-bg);color:var(--text);cursor:pointer">📍 Locate me</button>
         </div>
     </div>
 
@@ -166,6 +216,7 @@
                 <div class="info-item"><span class="info-label">Last</span><span id="lastUpdateOverlay">—</span></div>
             </div>
             <div id="map"></div>
+            <button id="mapThemeBtn" class="map-theme-btn" onclick="toggleMapTheme()" title="Toggle map light/dark">🗺️☀️</button>
             <div class="card" style="margin-top:10px">
                 <h3><span>📍</span> Map Layers</h3>
                 <div class="layer-control">
@@ -788,11 +839,46 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
             }catch(e){ /* ignore */ }
         }
 
+        let mapTileBase = null;
+        let mapTileLabels = null;
+        let mapIsDark = true;
+        const DARK_TILES = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png';
+        const DARK_LABELS = 'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png';
+        const LIGHT_TILES = 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png';
+        const LIGHT_LABELS = 'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png';
+        const TILE_OPTS = { attribution: '&copy; CARTO', maxZoom: 19, updateWhenIdle: false, updateWhenZooming: false, keepBuffer: 6 };
+
+        function setMapTiles(dark) {
+            mapIsDark = dark;
+            if (mapTileBase) { map.removeLayer(mapTileBase); }
+            if (mapTileLabels) { map.removeLayer(mapTileLabels); }
+            mapTileBase = L.tileLayer(dark ? DARK_TILES : LIGHT_TILES, TILE_OPTS).addTo(map);
+            mapTileLabels = L.tileLayer(dark ? DARK_LABELS : LIGHT_LABELS, { ...TILE_OPTS, attribution: '' }).addTo(map);
+            // Keep tiles behind markers
+            mapTileBase.setZIndex(0);
+            mapTileLabels.setZIndex(1);
+            const btn = document.getElementById('mapThemeBtn');
+            if (btn) btn.textContent = dark ? '🗺️☀️' : '🗺️🌙';
+        }
+
+        function toggleMapTheme() {
+            setMapTiles(!mapIsDark);
+        }
+
+        function toggleGlobalTheme() {
+            const body = document.body;
+            const goingLight = !body.classList.contains('light-mode');
+            body.classList.toggle('light-mode');
+            const btn = document.getElementById('globalThemeBtn');
+            if (btn) btn.textContent = goingLight ? '☀️' : '🌙';
+            // Global toggle also sets map to match
+            setMapTiles(!goingLight);
+        }
+
         function initMap() {
             const bounds = [[20.339920625677212, 85.7964659296332], [20.37210882553945, 85.83388810783698]];
             map = L.map('map', { zoomControl: true, maxBounds: bounds, minZoom: 14, preferCanvas: true }).setView([20.3549, 85.8161], 15);
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', { attribution: '&copy; CARTO', maxZoom: 19, updateWhenIdle: false, updateWhenZooming: false, keepBuffer: 6 }).addTo(map);
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { attribution: '', maxZoom: 19, updateWhenIdle: false, updateWhenZooming: false, keepBuffer: 6 }).addTo(map);
+            setMapTiles(true);
 
             // Responsive icon sizing on zoom
             currentIconSize = getIconSizeForZoom(map.getZoom());
