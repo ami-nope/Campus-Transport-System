@@ -240,21 +240,31 @@
         }
 
         function snapToRoute(lat, lng, busNum) {
-            // Determine which route this bus is on
             const rid = busRouteMap[busNum];
             if (!rid) return { pos: [lat, lng], segIdx: -1 };
             const coords = routeCoordsCache[rid];
             if (!coords || coords.length < 2) return { pos: [lat, lng], segIdx: -1 };
 
-            let bestDist = Infinity;
-            let bestPt = [lat, lng];
-            let bestSeg = -1;
-            for (let i = 0; i < coords.length - 1; i++) {
+            const n = coords.length - 1;
+            let bestDist = Infinity, bestPt = [lat, lng], bestSeg = -1;
+            const lastSeg = (busSnapInfo[busNum] && busSnapInfo[busNum].segIdx >= 0) ? busSnapInfo[busNum].segIdx : -1;
+
+            // Local search from last known segment (±30) — fast path
+            if (lastSeg >= 0) {
+                const lo = Math.max(0, lastSeg - 30), hi = Math.min(n - 1, lastSeg + 30);
+                for (let i = lo; i <= hi; i++) {
+                    const pt = closestPointOnSegment(lat, lng, coords[i][0], coords[i][1], coords[i+1][0], coords[i+1][1]);
+                    const d = calcDistance(lat, lng, pt[0], pt[1]);
+                    if (d < bestDist) { bestDist = d; bestPt = pt; bestSeg = i; }
+                }
+                if (bestDist <= SNAP_DIST_M) return { pos: bestPt, segIdx: bestSeg };
+            }
+            // Full scan fallback
+            for (let i = 0; i < n; i++) {
                 const pt = closestPointOnSegment(lat, lng, coords[i][0], coords[i][1], coords[i+1][0], coords[i+1][1]);
                 const d = calcDistance(lat, lng, pt[0], pt[1]);
                 if (d < bestDist) { bestDist = d; bestPt = pt; bestSeg = i; }
             }
-            // Only snap if within threshold
             if (bestDist <= SNAP_DIST_M) return { pos: bestPt, segIdx: bestSeg };
             return { pos: [lat, lng], segIdx: -1 };
         }
@@ -418,10 +428,13 @@
             try { const res = await fetch('/api/bus-routes'); busRouteMap = await res.json(); } catch(e) { console.error('Error loading bus routes:', e); }
         }
 
+        // Fast equirectangular distance — accurate within 0.1% at campus scale
+        const _DEG2RAD = Math.PI / 180;
         function calcDistance(lat1, lng1, lat2, lng2) {
-            const R = 6371; const dLat = (lat2 - lat1) * Math.PI / 180; const dLng = (lng2 - lng1) * Math.PI / 180;
-            const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng/2) * Math.sin(dLng/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); return R * c * 1000;
+            const dLat = (lat2 - lat1) * _DEG2RAD;
+            const dLng = (lng2 - lng1) * _DEG2RAD;
+            const x = dLng * Math.cos((lat1 + lat2) * 0.5 * _DEG2RAD);
+            return 6371000 * Math.sqrt(dLat * dLat + x * x);
         }
         function calcBearing(from, to) { const rad = Math.atan2(to[1] - from[1], to[0] - from[0]); return (rad * 180 / Math.PI + 90) % 360; }
 
@@ -435,26 +448,33 @@
             return 18;
         }
 
+        const _iconSvgCache = {};
         function createIcon(busNum, color, size, rotation = 0, glow = false) {
             size = size || currentIconSize;
-            const half = Math.round(size / 2);
-            const stroke = Math.max(1.5, Math.round(size * 0.1));
-            const headR = Math.round(size * 0.34);
-            const headCY = Math.round(size * 0.42);
-            const tipY = size - 1;
-            const fontSize = Math.max(8, Math.round(size * 0.40));
-            const textY = headCY;
-            const path = `M ${half} ${tipY} L ${Math.round(half - headR * 0.58)} ${Math.round(headCY + headR * 0.32)} A ${headR} ${headR} 0 1 1 ${Math.round(half + headR * 0.58)} ${Math.round(headCY + headR * 0.32)} L ${half} ${tipY} Z`;
-            const pad = 4;
-            const glowR = headR + 4;
-            const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="-${pad} -${pad} ${size+pad*2} ${size+pad*2}" style="filter:drop-shadow(0 0 6px ${color}88) drop-shadow(0 2px 3px rgba(0,0,0,0.6))">
+            const cacheKey = `${busNum}_${color}_${size}_${glow ? 1 : 0}`;
+            let cached = _iconSvgCache[cacheKey];
+            if (!cached) {
+                const half = Math.round(size / 2);
+                const stroke = Math.max(1.5, Math.round(size * 0.1));
+                const headR = Math.round(size * 0.34);
+                const headCY = Math.round(size * 0.42);
+                const tipY = size - 1;
+                const fontSize = Math.max(8, Math.round(size * 0.40));
+                const textY = headCY;
+                const path = `M ${half} ${tipY} L ${Math.round(half - headR * 0.58)} ${Math.round(headCY + headR * 0.32)} A ${headR} ${headR} 0 1 1 ${Math.round(half + headR * 0.58)} ${Math.round(headCY + headR * 0.32)} L ${half} ${tipY} Z`;
+                const pad = 4;
+                const glowR = headR + 4;
+                const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="-${pad} -${pad} ${size+pad*2} ${size+pad*2}" style="filter:drop-shadow(0 0 6px ${color}88) drop-shadow(0 2px 3px rgba(0,0,0,0.6))">
               ${glow ? `<circle cx="${half}" cy="${headCY}" r="${glowR}" fill="${color}" opacity="0.2"/>` : ''}
               <path d="${path}" fill="${color}" stroke="#fff" stroke-width="${stroke}"/>
               <circle cx="${half}" cy="${Math.round(headCY - headR * 0.15)}" r="${Math.round(headR * 0.55)}" fill="rgba(255,255,255,0.15)"/>
               <text x="${half}" y="${textY}" text-anchor="middle" dominant-baseline="central"
                 fill="#fff" font-family="Segoe UI,Arial" font-weight="800" font-size="${fontSize}" style="text-shadow:0 1px 2px rgba(0,0,0,0.5)">${busNum}</text>
             </svg>`;
-            return L.divIcon({ className: 'bus-icon', html: svg, iconSize: [size, size], iconAnchor: [half, tipY] });
+                cached = { svg, half, tipY, size };
+                _iconSvgCache[cacheKey] = cached;
+            }
+            return L.divIcon({ className: 'bus-icon', html: cached.svg, iconSize: [cached.size, cached.size], iconAnchor: [cached.half, cached.tipY] });
         }
 
         function createLocationIcon(type) { const html = type === 'hostel' ? '<span class="tiny-marker tiny-hostel"></span>' : '<span class="tiny-marker tiny-class"></span>'; return L.divIcon({ className: 'marker-wrapper', html, iconSize: [10,10], iconAnchor: [5,5], popupAnchor: [0, -8] }); }
@@ -965,7 +985,8 @@
                             const now = new Date().toLocaleTimeString();
                             const luSidebar = document.getElementById('lastUpdate'); if (luSidebar) luSidebar.textContent = now;
                             const luOverlay = document.getElementById('lastUpdateOverlay'); if (luOverlay) luOverlay.textContent = now;
-                            computeAndShowStudentETA(latestBuses);
+                            // Throttle ETA recomputation from SSE — at most once per second
+                            if (!window._etaThrottle) { window._etaThrottle = setTimeout(() => { window._etaThrottle = null; computeAndShowStudentETA(latestBuses); }, 1000); }
                         } else if(msg.type === 'bus_stop'){
                             const busNum = String(msg.bus);
                             delete latestBuses[busNum];

@@ -4,6 +4,7 @@ import json
 import os
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
+from datetime import datetime, timezone
 import threading
 import queue
 import time
@@ -71,7 +72,6 @@ def _init_app():
     cleaned = {}
     for k, v in raw.items():
         try:
-            from datetime import datetime, timezone
             ts = datetime.fromisoformat(v.get('lastUpdate', '').replace('Z', '+00:00')).timestamp()
             if (now - ts) <= 60:
                 cleaned[k] = v
@@ -98,10 +98,11 @@ def _sync_worker():
         time.sleep(2)
         try:
             with _buses_lock:
-                snap = json.dumps(_buses, sort_keys=True)
-            if snap != last:
-                save_json(BUSES_FILE, json.loads(snap))
-                last = snap
+                snap = {k: dict(v) for k, v in _buses.items()}
+            snap_str = json.dumps(snap, sort_keys=True)
+            if snap_str != last:
+                save_json(BUSES_FILE, snap)
+                last = snap_str
         except Exception:
             pass
 
@@ -127,13 +128,13 @@ def sse_events():
         return Response('SSE disabled', status=503, mimetype='text/plain')
     def stream():
         q = queue.Queue(maxsize=100)
+        hb = max(5, int(os.environ.get('SSE_HEARTBEAT_SEC', '20')))
         with _subscribers_lock:
             _subscribers.append(q)
         yield 'event: ping\ndata: "connected"\n\n'
         try:
             while True:
                 try:
-                    hb = max(5, int(os.environ.get('SSE_HEARTBEAT_SEC', '20')))
                     msg = q.get(timeout=hb)
                     yield f'data: {msg}\n\n'
                 except queue.Empty:

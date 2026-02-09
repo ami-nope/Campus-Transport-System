@@ -270,15 +270,11 @@ function animate(now) {
   if (isMoving) {
     lat += dy * speedDegPerSec * boost * dt;
     lng += dx * speedDegPerSec * boost * dt;
+    marker.setLatLng([lat, lng]);
+    trailPoints.push([lat, lng]);
+    if (trailPoints.length > MAX_TRAIL) trailPoints.shift();
+    trail.setLatLngs(trailPoints);
   }
-
-  // Update marker
-  marker.setLatLng([lat, lng]);
-
-  // Trail
-  trailPoints.push([lat, lng]);
-  if (trailPoints.length > MAX_TRAIL) trailPoints.shift();
-  trail.setLatLngs(trailPoints);
 
   // Soft camera follow — pan only when near edge
   try {
