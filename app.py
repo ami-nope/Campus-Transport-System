@@ -1,6 +1,11 @@
-import gevent.monkey
-gevent.monkey.patch_all()
-import gevent
+# Try gevent if available, but work without it too
+try:
+    import gevent.monkey
+    gevent.monkey.patch_all()
+    import gevent
+    HAS_GEVENT = True
+except ImportError:
+    HAS_GEVENT = False
 
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, Response, stream_with_context
 from flask_cors import CORS
@@ -85,7 +90,7 @@ def _before():
 def _sync_worker():
     last = None
     while True:
-        gevent.sleep(2)
+        time.sleep(2)
         try:
             with _buses_lock:
                 snap = json.dumps(_buses, sort_keys=True)
