@@ -48,6 +48,13 @@ REQUESTS_TOTAL = 0
 
 @app.before_request
 def _count_request():
+    # Lazy initialization on first request to ensure fast import
+    global _buses_cache
+    if not hasattr(app, '_is_initialized'):
+        _ensure_files_exist()
+        start_background_worker()
+        app._is_initialized = True
+    
     # Skip noise from health checks optionally
     global REQUESTS_TOTAL
     REQUESTS_TOTAL += 1
@@ -133,53 +140,45 @@ def safe_save_json(path: str, data):
                     time.sleep(0.02) # yield to reader
         except Exception:
             # Fallback if something fails
-            if os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except:
-                    pass
+# Global variable, initialized lazily
+_buses_cache = None
 
-
-try:
-    with open(BUSES_FILE, 'r') as _f:
-        _buses_cache = json.load(_f)
-except Exception:
-    _buses_cache = {}
+def get_buses_cache():
+    global _buses_cache
+    if _buses_cache is None:
+        try:
+            with open(BUSES_FILE, 'r') as _f:
+                _buses_cache = json.load(_f)
+        except Exception:
+            _buses_cache = {}
+    return _buses_cache
 
 _buses_lock = threading.Lock()
 _worker_initialized = False
 
 def start_background_worker():
     global _worker_initialized
-    # Double check locking pattern not strictly needed for boolean flag in GIL/gevent
-    # but good practice. Using simple check for speed.
     if _worker_initialized:
         return
-    
     _worker_initialized = True
-    # Start background sync thread (daemon dies when app dies)
-    # Only if we are in the main execution context to avoid reloader spawning twice (though daemon is fine)
-    # guard against re-import in gunicorn workers
-    if __name__ == "__main__" or os.environ.get('GUNICORN_CMD_ARGS'):
-         # In gunicorn, we actually DO want it to run. The prompt asked for if name == main guard
-         # but that disables it in production. We use a lazy starter triggered by requests instead.
-         pass
-         
-    # Actually start the thread
     threading.Thread(target=_sync_worker, daemon=True).start()
 
 def _sync_worker():
+    # Ensure cache is loaded before syncing
+    get_buses_cache()
+    
     last_snapshot = None
     while True:
-  REMOVED global start:         try:
+        gevent.sleep(2) # Sync every 2 seconds
+        try:
             # Snapshot for saving
             with _buses_lock:
-                current_snapshot = json.dumps(_buses_cache, sort_keys=True)
+                # Use getter
+                current_snapshot = json.dumps(get_buses_cache(), sort_keys=True)
             
             # Only save if data changed to avoid disk I/O
             if current_snapshot != last_snapshot:
                 # We need to save the dict, not the string, as safe_save_json dumps it
-                # Optimization: To avoid double dump, we could refactor safe_save_json, but this is fine
                 data_to_save = json.loads(current_snapshot)
                 
                 # Offload blocking file I/O to threadpool so main loop (greenlets) doesn't freeze
@@ -190,8 +189,7 @@ def _sync_worker():
             pass
 
 # Start background sync thread (daemon dies when app dies)
-# Only if we are in the main execution context to avoid reloader spawning twice (though daemon is fine)
-threading.Thread(target=_sync_worker, daemon=True).start()
+# REMOVED global start: threading.Thread(target=_sync_worker, daemon=True).start()
 
 
 # === SSE subscribers ===
