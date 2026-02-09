@@ -742,13 +742,13 @@ def get_bus_routes():
 @app.route('/healthz')
 def healthz():
     try:
-        locs = safe_load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+        locs = get_locations_cache()
         ok = isinstance(_buses_cache, dict) and isinstance(locs, dict)
         return jsonify({
             'status': 'ok' if ok else 'degraded',
             'uptime_sec': int(time.time() - APP_START_TS),
             'sse_clients': len(_subscribers),
-           get_locations_cache(
+            'buses_count': len(_buses_cache),
             'routes_count': len(locs.get('routes', [])),
         }), 200 if ok else 503
     except Exception:
@@ -756,7 +756,7 @@ def healthz():
 
 @app.route('/status')
 def status():
-    locs = safe_load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+    locs = get_locations_cache()
     return jsonify({
         'uptime_sec': int(time.time() - APP_START_TS),
         'requests_total': REQUESTS_TOTAL,
