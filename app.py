@@ -161,6 +161,12 @@ def student_view():
     institute = creds.get('institute_name', 'INSTITUTE')
     return render_template('student.html', institute_name=institute)
 
+@app.route('/simulator')
+def simulator_view():
+    creds = load_credentials()
+    institute = creds.get('institute_name', 'INSTITUTE')
+    return render_template('simulator.html', institute_name=institute)
+
  
 @app.route('/api/metrics', methods=['GET'])
 def get_metrics():
