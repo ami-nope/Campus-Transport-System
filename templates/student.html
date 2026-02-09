@@ -182,6 +182,12 @@
         let busRouteMap = {}; // Maps bus number to route ID
         let userMarker = null;
         let userWatchId = null;
+        // Shared buses cache to avoid redundant /api/buses fetches
+        let latestBuses = {};
+        let sseConnected = false;
+        let busesPollTimerId = null;
+        const POLL_INTERVAL_MS = 5000;   // slower polling
+        const RESYNC_INTERVAL_MS = 20000; // occasional full resync even with SSE
         const OFFLINE_MS = 15000; // remove buses after ~15 seconds of no updates
         const colors = [
             '#FF3B30', '#34C759', '#007AFF', '#FF9500', '#AF52DE',
@@ -402,7 +408,7 @@
 
         async function showRouteDetails(route) {
             const card = document.getElementById('routeDetailsCard'); card.style.display = 'block';
-            const busesData = await fetch('/api/buses').then(r => r.json()).catch(() => ({}));
+            const busesData = latestBuses || {};
             const busesOnRoute = Object.entries(busesData)
                 .filter(([busNum, b]) => {
                     const rid = (b && b.routeId != null) ? b.routeId : busRouteMap[busNum];
@@ -428,9 +434,9 @@
         function formatHHMM(totalSeconds){ const mins = Math.max(0, Math.round(totalSeconds/60)); const h = Math.floor(mins/60); const m = mins % 60; return h>0 ? `${h}:${String(m).padStart(2,'0')}` : `${m}m`; }
         function maybeUpdateStudentEta(html){ const now = Date.now(); if(now - studentEtaLastTs >= STUD_ETA_UPDATE_MS && html !== studentEtaLastHtml){ const etaEl = document.getElementById('etaValue'); const etaOverlay = document.getElementById('etaOverlay'); if(etaEl) etaEl.innerHTML = html; if(etaOverlay) etaOverlay.innerHTML = html; studentEtaLastHtml = html; studentEtaLastTs = now; } }
 
-        async function computeAndShowStudentETA(){
+        async function computeAndShowStudentETA(busesDataParam){
             const etaEl = document.getElementById('etaValue'); const etaOverlay = document.getElementById('etaOverlay');
-            const busesData = await fetch('/api/buses').then(r=>r.json()).catch(()=>({}));
+            const busesData = busesDataParam || latestBuses || {};
             const nowMs = Date.now();
             const freshEntries = Object.entries(busesData).filter(([num,b])=>{ const t = b && b.lastUpdate ? parseIsoTime(b.lastUpdate) : null; return t && (nowMs - t) <= OFFLINE_MS; });
             const freshData = Object.fromEntries(freshEntries);
@@ -502,17 +508,24 @@
             L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', { attribution: '&copy; CARTO', maxZoom: 19 }).addTo(map);
             L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { attribution: '', maxZoom: 19 }).addTo(map);
             if(userLocation){ updateUserMarker(userLocation); }
-            updateBuses(); setInterval(updateBuses, 3000);
+            updateBuses();
+            busesPollTimerId = setInterval(updateBuses, POLL_INTERVAL_MS);
             initSSE();
             loadHostels(); loadClasses(); loadRoutes(); loadBusRoutes();
             loadMetrics();
             document.getElementById('hostelsToggle').addEventListener('change', (e) => { updateLayerVisibility('hostels', e.target.checked); });
             document.getElementById('classesToggle').addEventListener('change', (e) => { updateLayerVisibility('classes', e.target.checked); });
             document.getElementById('routesToggle').addEventListener('change', (e) => { updateLayerVisibility('routes', e.target.checked); });
+            // Pause polling when tab hidden; resume on show if SSE not connected
+            document.addEventListener('visibilitychange', ()=>{
+                if(document.hidden){ if(busesPollTimerId){ try{ clearInterval(busesPollTimerId); }catch(e){} busesPollTimerId=null; }
+                } else { if(!sseConnected && !busesPollTimerId){ busesPollTimerId = setInterval(updateBuses, POLL_INTERVAL_MS); } }
+            });
         }
 
         function updateBuses() {
             fetch('/api/buses').then(response => response.json()).then(buses => {
+                latestBuses = buses || {};
                 const nowMs = Date.now();
                 const busNumbers = Object.keys(buses);
                 // Only keep buses fresh within OFFLINE_MS
@@ -558,7 +571,7 @@
                     const marker = busMarkers[busNum]; const isTrackedNow = trackedBus && busNum === trackedBus; try { marker.setOpacity(isTrackedNow ? 1 : 0.6); } catch(e) {} if (isTrackedNow && followEnabled) { map.panTo(position); }
                 });
                 updateActiveBusList(freshBusNumbers, buses);
-                computeAndShowStudentETA();
+                computeAndShowStudentETA(latestBuses);
                 const now = new Date().toLocaleTimeString(); const luSidebar = document.getElementById('lastUpdate'); if (luSidebar) luSidebar.textContent = now; const luOverlay = document.getElementById('lastUpdateOverlay'); if (luOverlay) luOverlay.textContent = now;
             }).catch(error => console.error('Error:', error));
         }
@@ -585,6 +598,12 @@
         function initSSE(){
             try{
                 const es = new EventSource('/events');
+                es.onopen = ()=>{
+                    sseConnected = true;
+                    if(busesPollTimerId){ try{ clearInterval(busesPollTimerId); }catch(e){} busesPollTimerId=null; }
+                    // Light resync every RESYNC_INTERVAL_MS to prune stale buses
+                    if(!window.__resyncTimer){ window.__resyncTimer = setInterval(()=>{ if(!document.hidden) updateBuses(); }, RESYNC_INTERVAL_MS); }
+                };
                 es.onmessage = (ev)=>{
                     try{
                         const msg = JSON.parse(ev.data);
@@ -594,6 +613,8 @@
                             if(typeof b.lat !== 'number' || typeof b.lng !== 'number') return;
                             // update route mapping if provided
                             if(b.routeId != null) busRouteMap[busNum] = b.routeId;
+                            // update cache and animate
+                            latestBuses[busNum] = { ...(latestBuses[busNum]||{}), ...b };
                             if(!busMarkers[busNum]){
                                 const color = colors[(parseInt(busNum) - 1) % colors.length];
                                 const icon = createIcon(busNum, color, 24, 0, false);
@@ -605,14 +626,21 @@
                             const now = new Date().toLocaleTimeString();
                             const luSidebar = document.getElementById('lastUpdate'); if (luSidebar) luSidebar.textContent = now;
                             const luOverlay = document.getElementById('lastUpdateOverlay'); if (luOverlay) luOverlay.textContent = now;
-                            computeAndShowStudentETA();
+                            computeAndShowStudentETA(latestBuses);
                         } else if(msg.type === 'bus_stop'){
                             const busNum = String(msg.bus);
+                            delete latestBuses[busNum];
                             const m = busMarkers[busNum]; if(m){ try{ map.removeLayer(m); }catch(e){} delete busMarkers[busNum]; }
                         } else if(msg.type === 'buses_clear'){
+                            latestBuses = {};
                             Object.values(busMarkers).forEach(m=>{ try{ map.removeLayer(m); }catch(e){} }); busMarkers = {};
                         }
                     }catch(e){ /* ignore */ }
+                };
+                es.onerror = ()=>{
+                    // If SSE fails, ensure polling is running
+                    sseConnected = false;
+                    if(!busesPollTimerId){ busesPollTimerId = setInterval(updateBuses, POLL_INTERVAL_MS); }
                 };
             }catch(e){ /* SSE not available, keep polling */ }
         }

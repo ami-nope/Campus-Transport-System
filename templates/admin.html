@@ -818,9 +818,10 @@
             await loadBuses();
         });
 
-        // Auto-refresh for transports list
+        // Auto-refresh for transports list (paused when SSE connected)
         let busesAutoRefreshId = null;
         let isBusesRefreshing = false;
+        let sseConnected = false;
         function startBusesAutoRefresh(){
             stopBusesAutoRefresh();
             busesAutoRefreshId = setInterval(async ()=>{
@@ -828,6 +829,7 @@
                 const busListEl = document.getElementById('busList');
                 if(!busesTab || !busesTab.classList.contains('active')) return;
                 if(document.hidden) return;
+                if(sseConnected) return; // let SSE drive incremental updates
                 if(isBusesRefreshing) return;
                 const activeEl = document.activeElement;
                 if(activeEl && busListEl && busListEl.contains(activeEl) && (activeEl.tagName==='INPUT' || activeEl.tagName==='BUTTON')) return;
@@ -838,7 +840,7 @@
                     const buses = await res.json();
                     renderBuses(buses);
                 } finally { isBusesRefreshing = false; }
-            }, 3000);
+            }, 6000);
         }
         function stopBusesAutoRefresh(){
             if(busesAutoRefreshId){ try{ clearInterval(busesAutoRefreshId); }catch(e){} busesAutoRefreshId = null; }
@@ -851,6 +853,7 @@
         // Live updates via SSE
         try{
             const es = new EventSource('/events');
+            es.onopen = ()=>{ sseConnected = true; stopBusesAutoRefresh(); };
             es.onmessage = (ev)=>{
                 try{
                     const msg = JSON.parse(ev.data);
@@ -866,6 +869,7 @@
                     }
                 }catch(e){ /* ignore */ }
             };
+            es.onerror = ()=>{ sseConnected = false; startBusesAutoRefresh(); };
         }catch(e){ /* SSE not available, fallback to polling only */ }
 
         // ==== BUILDINGS MAP ====
