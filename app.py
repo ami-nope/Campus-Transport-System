@@ -701,15 +701,7 @@ def delete_class(class_id):
     
     locations['classes'] = [c for c in locations.get('classes', []) if c['id'] != class_id]
     
-    gevent.get_hub().threadpool.apply(safe_save_json, args=(LOCATIONS_FILE, locations)ass': cls})
-
-@app.route('/api/class/<class_id>', methods=['DELETE'])
-def delete_class(class_id):
-    locations = safe_load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
-    
-    locations['classes'] = [c for c in locations.get('classes', []) if c['id'] != class_id]
-    
-    safe_save_json(LOCATIONS_FILE, locations)
+    gevent.get_hub().threadpool.apply(safe_save_json, args=(LOCATIONS_FILE, locations))
     
     return jsonify({'status': 'success'})
 
