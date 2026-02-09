@@ -239,14 +239,19 @@
 
         // Removed building icons and renderers for a cleaner driver view
 
+        // OSRM helpers with timeout + graceful fallback
+        async function osrmFetch(url, timeoutMs=5000){
+            const ctrl = new AbortController(); const t = setTimeout(()=>ctrl.abort(), timeoutMs);
+            try{ const res = await fetch(url, { signal: ctrl.signal }); clearTimeout(t); if(!res.ok) throw new Error(`HTTP ${res.status}`); return await res.json(); }catch(e){ clearTimeout(t); throw e; }
+        }
         async function getOSRMRoute(waypoints){
             try{
                 if(!waypoints || waypoints.length<2) return waypoints;
                 const coords = waypoints.map(w=>`${w[1]},${w[0]}`).join(';');
                 const url = `https://router.project-osrm.org/route/v1/driving/${coords}?geometries=geojson`;
-                const res = await fetch(url); const data = await res.json();
+                const data = await osrmFetch(url, 5000);
                 if(data.routes && data.routes[0]) return data.routes[0].geometry.coordinates.map(c=>[c[1],c[0]]);
-            }catch(e){ console.warn('OSRM error', e); }
+            }catch(e){ console.warn('OSRM route fallback', e); }
             return waypoints;
         }
 
@@ -399,8 +404,12 @@
             const nextIdx = Math.min(route.waypoints.length-1, Math.max(1, prog.nextIdx));
             const target = route.waypoints[nextIdx]; if(!target) return;
             const url = `https://router.project-osrm.org/route/v1/driving/${lng},${lat};${target[1]},${target[0]}?overview=false`;
-            try{ const res = await fetch(url); if(!res.ok) throw new Error('OSRM'); const j = await res.json(); if(j && j.routes && j.routes.length){ const secs = Math.round(j.routes[0].duration); document.getElementById('etaDisplay').textContent = formatSeconds(secs); return; } }catch(e){ console.warn('OSRM fail',e); }
-            const meters = Math.sqrt(Math.pow(lat-target[0],2)+Math.pow(lng-target[1],2)) * 111000; const estSecs = Math.round(meters/ (12*1000/3600) ); etaEl.textContent = formatSeconds(estSecs);
+            try{
+                const j = await osrmFetch(url, 5000);
+                if(j && j.routes && j.routes.length){ const secs = Math.round(j.routes[0].duration); document.getElementById('etaDisplay').textContent = formatSeconds(secs); return; }
+            }catch(e){ console.warn('OSRM duration fallback', e); }
+            // Fallback: straight-line distance / avg speed (km/h)
+            const meters = Math.sqrt(Math.pow(lat-target[0],2)+Math.pow(lng-target[1],2)) * 111000; const avgKmh = 20; const estSecs = Math.round(meters/ (avgKmh*1000/3600) ); etaEl.textContent = formatSeconds(estSecs);
         }
 
         function formatSeconds(s){ if(!isFinite(s)) return '—'; if(s<60) return `${s}s`; const m=Math.floor(s/60); const rem=s%60; return `${m}m ${rem}s`; }

@@ -42,6 +42,24 @@ if not os.path.exists(CREDENTIALS_FILE):
     with open(CREDENTIALS_FILE, 'w') as f:
         json.dump({"admins": [], "institute_name": "INSTITUTE"}, f)
 
+# Safe JSON helpers to tolerate file corruption
+def safe_load_json(path: str, default):
+    try:
+        with open(path, 'r') as f:
+            return json.load(f)
+    except Exception:
+        # Reset corrupted file
+        try:
+            with open(path, 'w') as f:
+                json.dump(default, f)
+        except Exception:
+            pass
+        return default
+
+def safe_save_json(path: str, data):
+    with open(path, 'w') as f:
+        json.dump(data, f, indent=2)
+
 # === SSE subscribers ===
 _subscribers_lock = threading.Lock()
 _subscribers = []  # list[queue.Queue]
@@ -333,15 +351,13 @@ def admin_logout():
 
 @app.route('/api/buses', methods=['GET'])
 def get_all_buses():
-    with open(BUSES_FILE, 'r') as f:
-        buses = json.load(f)
+    buses = safe_load_json(BUSES_FILE, {})
     return jsonify(buses)
 
 @app.route('/api/buses/clear', methods=['POST'])
 def clear_all_buses():
     # Clear all bus entries by resetting the JSON file
-    with open(BUSES_FILE, 'w') as f:
-        json.dump({}, f)
+    safe_save_json(BUSES_FILE, {})
     # Broadcast clear event
     try:
         broadcast({ 'type': 'buses_clear' })
@@ -419,24 +435,28 @@ def delete_route(route_id):
 
 @app.route('/api/bus/<int:bus_number>', methods=['POST'])
 def update_bus_location(bus_number):
-    data = request.json
-    
-    with open(BUSES_FILE, 'r') as f:
-        buses = json.load(f)
-    
+    # Accept JSON or form; validate required fields
+    raw = request.get_json(silent=True) or request.form.to_dict() or {}
+    try:
+        lat = float(raw.get('lat'))
+        lng = float(raw.get('lng'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'Provide numeric lat and lng'}), 400
+    last_update = raw.get('lastUpdate') or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+    buses = safe_load_json(BUSES_FILE, {})
     # Preserve existing route assignment when updating location
     existing = buses.get(str(bus_number), {})
-    route_id = data.get('routeId', existing.get('routeId'))
+    route_id = raw.get('routeId', existing.get('routeId'))
 
     buses[str(bus_number)] = {
-        'lat': data['lat'],
-        'lng': data['lng'],
-        'lastUpdate': data.get('lastUpdate', ''),
+        'lat': lat,
+        'lng': lng,
+        'lastUpdate': last_update,
         'routeId': route_id
     }
     
-    with open(BUSES_FILE, 'w') as f:
-        json.dump(buses, f)
+    safe_save_json(BUSES_FILE, buses)
     # Broadcast bus update
     try:
         broadcast({ 'type': 'bus_update', 'bus': str(bus_number), 'data': buses.get(str(bus_number), {}) })
@@ -446,14 +466,12 @@ def update_bus_location(bus_number):
 
 @app.route('/api/bus/<int:bus_number>', methods=['DELETE'])
 def stop_bus(bus_number):
-    with open(BUSES_FILE, 'r') as f:
-        buses = json.load(f)
+    buses = safe_load_json(BUSES_FILE, {})
     
     if str(bus_number) in buses:
         del buses[str(bus_number)]
     
-    with open(BUSES_FILE, 'w') as f:
-        json.dump(buses, f)
+    safe_save_json(BUSES_FILE, buses)
     # Broadcast bus stop
     try:
         broadcast({ 'type': 'bus_stop', 'bus': str(bus_number) })
@@ -531,11 +549,10 @@ def delete_class(class_id):
 
 @app.route('/api/bus/<int:bus_number>/route', methods=['POST'])
 def set_bus_route(bus_number):
-    data = request.json
+    data = request.get_json(silent=True) or {}
     route_id = data.get('routeId')
     
-    with open(BUSES_FILE, 'r') as f:
-        buses = json.load(f)
+    buses = safe_load_json(BUSES_FILE, {})
     
     if str(bus_number) in buses:
         buses[str(bus_number)]['routeId'] = route_id
@@ -547,8 +564,7 @@ def set_bus_route(bus_number):
             'routeId': route_id
         }
     
-    with open(BUSES_FILE, 'w') as f:
-        json.dump(buses, f)
+    safe_save_json(BUSES_FILE, buses)
     # Broadcast route assignment
     try:
         broadcast({ 'type': 'route_set', 'bus': str(bus_number), 'routeId': route_id })
@@ -558,8 +574,7 @@ def set_bus_route(bus_number):
 
 @app.route('/api/bus-routes', methods=['GET'])
 def get_bus_routes():
-    with open(BUSES_FILE, 'r') as f:
-        buses = json.load(f)
+    buses = safe_load_json(BUSES_FILE, {})
     
     result = {}
     for bus_num, bus_info in buses.items():
