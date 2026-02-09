@@ -65,7 +65,21 @@ REQUESTS_TOTAL = 0
 def _init_app():
     global _buses, _worker_started
     ensure_files()
-    _buses = load_json(BUSES_FILE, {})
+    raw = load_json(BUSES_FILE, {})
+    # Filter out stale buses on startup (older than 60s)
+    now = time.time()
+    cleaned = {}
+    for k, v in raw.items():
+        try:
+            from datetime import datetime, timezone
+            ts = datetime.fromisoformat(v.get('lastUpdate', '').replace('Z', '+00:00')).timestamp()
+            if (now - ts) <= 60:
+                cleaned[k] = v
+        except Exception:
+            pass  # drop invalid entries
+    _buses = cleaned
+    if cleaned != raw:
+        save_json(BUSES_FILE, cleaned)
     if not _worker_started:
         _worker_started = True
         threading.Thread(target=_sync_worker, daemon=True).start()

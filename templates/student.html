@@ -195,8 +195,8 @@
         let latestBuses = {};
         let sseConnected = false;
         let busesPollTimerId = null;
-        const POLL_INTERVAL_MS = 2000;   // fast polling for responsiveness
-        const RESYNC_INTERVAL_MS = 10000; // occasional full resync even with SSE
+        const POLL_INTERVAL_MS = 2000;   // fast polling fallback when SSE is down
+        const RESYNC_INTERVAL_MS = 30000; // light cleanup resync every 30s
         const OFFLINE_MS = 30000; // mark bus offline after 30s of no updates
         const REMOVE_MS = 60000; // remove bus marker after 60s of no updates
         const colors = [
@@ -214,6 +214,7 @@
         let prevRouteSelState = {};
         let followEnabled = true;
         let busLastSeen = {};  // busNum -> Date.now() of last received update
+        let busLastSSEUpdate = {};  // busNum -> Date.now() of last SSE-driven update (to skip redundant polls)
         let busDirection = {};  // busNum -> 'up' | 'down' (direction along route stops)
         let busLastStopIdx = {}; // busNum -> last nearest stop index
         let busCurrentStop = {}; // busNum -> stop name if at a stop, null otherwise
@@ -759,8 +760,9 @@
             updateBuses();
             busesPollTimerId = setInterval(updateBuses, POLL_INTERVAL_MS);
             initSSE();
-            loadHostels(); loadClasses(); loadRoutes(); loadBusRoutes();
-            loadMetrics();
+            // Defer non-critical loads slightly to speed up initial render
+            setTimeout(() => { loadHostels(); loadClasses(); loadBusRoutes(); loadMetrics(); }, 100);
+            loadRoutes();
             document.getElementById('hostelsToggle').addEventListener('change', (e) => { updateLayerVisibility('hostels', e.target.checked); });
             document.getElementById('classesToggle').addEventListener('change', (e) => { updateLayerVisibility('classes', e.target.checked); });
             document.getElementById('routesToggle').addEventListener('change', (e) => { updateLayerVisibility('routes', e.target.checked); });
@@ -797,9 +799,19 @@
                 const activeCountOverlay = document.getElementById('activeCountOverlay'); if (activeCountOverlay) activeCountOverlay.textContent = activeCount;
                 // Remove markers for buses missing or fully stale (beyond REMOVE_MS)
                 const existingBuses = Object.keys(busMarkers);
-                existingBuses.forEach(busNum => { if (!freshBusNumbers.includes(busNum)) { map.removeLayer(busMarkers[busNum]); delete busMarkers[busNum]; delete prevRawPositions[busNum]; delete prevBusPositions[busNum]; delete prevBusTimes[busNum]; delete busLastSeen[busNum]; delete busDirection[busNum]; delete busLastStopIdx[busNum]; delete busCurrentStop[busNum]; } });
+                existingBuses.forEach(busNum => { if (!freshBusNumbers.includes(busNum)) { map.removeLayer(busMarkers[busNum]); delete busMarkers[busNum]; delete prevRawPositions[busNum]; delete prevBusPositions[busNum]; delete prevBusTimes[busNum]; delete busLastSeen[busNum]; delete busLastSSEUpdate[busNum]; delete busDirection[busNum]; delete busLastStopIdx[busNum]; delete busCurrentStop[busNum]; } });
                 freshBusNumbers.forEach(busNum => {
                     const bus = buses[busNum]; const rawPos = [bus.lat, bus.lng]; const color = colors[(parseInt(busNum) - 1) % colors.length];
+                    // If SSE already updated this bus recently, skip poll processing to avoid teleporting
+                    const lastSSE = busLastSSEUpdate[busNum] || 0;
+                    if (sseConnected && (nowMs - lastSSE) < 3000 && busMarkers[busNum]) {
+                        // SSE is handling this bus live — just update status/opacity
+                        const status = determineStatus(busNum, rawPos, bus.lastUpdate);
+                        const isOffline = status === 'Offline';
+                        const isTrackedNow = trackedBus && busNum === trackedBus;
+                        try { busMarkers[busNum].setOpacity(isOffline ? 0.3 : (isTrackedNow ? 1 : 0.7)); } catch(e) {}
+                        return;
+                    }
                     // Snap to route if close enough
                     const snapResult = snapToRoute(rawPos[0], rawPos[1], busNum);
                     const position = snapResult.pos;
@@ -899,6 +911,7 @@
                             if(b.routeId != null) busRouteMap[busNum] = b.routeId;
                             // Track last seen time, direction, and raw position for status
                             busLastSeen[busNum] = Date.now();
+                            busLastSSEUpdate[busNum] = Date.now();
                             updateBusDirection(busNum, [b.lat, b.lng]);
                             prevRawPositions[busNum] = [b.lat, b.lng];
                             if(b.lastUpdate) prevBusTimes[busNum] = parseIsoTime(b.lastUpdate);
@@ -908,7 +921,9 @@
                                 const color = colors[(parseInt(busNum) - 1) % colors.length];
                                 const icon = createIcon(busNum, color, currentIconSize, 0, false);
                                 busMarkers[busNum] = L.marker([b.lat,b.lng], { icon, title: `Transport ${busNum}` }).addTo(map);
-                                busMarkers[busNum].bindPopup(() => buildBusPopup(busNum, b));
+                                busMarkers[busNum].bindPopup(() => buildBusPopup(busNum, latestBuses[busNum] || b));
+                                busMarkers[busNum].on('click', () => { setTrackedBus(busNum); if (followEnabled) map.setView([b.lat,b.lng], 17); busMarkers[busNum].openPopup(); });
+                                busMarkers[busNum].on('mouseover', () => { followEnabled = false; }); busMarkers[busNum].on('mouseout', () => { followEnabled = true; });
                             } else {
                                 queueBusTween(busNum, [b.lat, b.lng]);
                             }
@@ -920,6 +935,7 @@
                             const busNum = String(msg.bus);
                             delete latestBuses[busNum];
                             delete busLastSeen[busNum];
+                            delete busLastSSEUpdate[busNum];
                             delete prevRawPositions[busNum];
                             delete prevBusPositions[busNum];
                             delete prevBusTimes[busNum];
