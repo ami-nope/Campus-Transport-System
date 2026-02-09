@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Bus Tracker - Student View</title>
+    <title>Transport Tracker - Student View</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
@@ -80,13 +80,40 @@
             .sidebar { order: 1 }
             #map { height: 420px }
         }
+
+        
+        .stat-box {
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.18);
+            background-image: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.03));
+            backdrop-filter: blur(16px) saturate(140%);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.08);
+        }
+        .info-item,
+        .overlay-pill {
+            border: 1px solid rgba(255,255,255,0.18);
+            background-image: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02));
+            backdrop-filter: blur(16px) saturate(140%);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(255,255,255,0.06);
+        }
+        .route-chip {
+            border-color: rgba(255,255,255,0.18);
+            background-image: linear-gradient(180deg, rgba(255,255,255,0.10), rgba(255,255,255,0.02));
+            box-shadow: 0 4px 16px rgba(0,0,0,0.30), inset 0 0 0 1px rgba(255,255,255,0.06);
+        }
+        /* Blur non-selected route stops */
+        .marker-wrapper.stop-blur {
+            filter: blur(1.6px) brightness(0.95);
+            opacity: 0.6;
+            transition: filter 150ms ease, opacity 150ms ease;
+        }
     </style>
 </head>
 <body>
     <div class="header">
         <div>
-            <h1><span class="icon">🚍</span>Never Miss Your Campus Shuttle</h1>
-            <p>Powered by {{ institute_name | default('INSTITUTE') }} • Live tracking</p>
+            <h1><span class="icon">🚍</span>Campus Transport System</h1>
+            <p>Powered by KIIT Transport Live tracking</p>
         </div>
         <button id="locateMeBtn" style="padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,0.1);background:#0f0f23;color:#e6eef8;cursor:pointer">📍 Locate me</button>
     </div>
@@ -96,8 +123,8 @@
             <div class="card">
                 <h3><span class="icon">📊</span> Live Statistics</h3>
                 <div class="stats-grid">
-                    <div class="stat-box"><div class="stat-number" id="activeBusCount">0</div><div class="stat-label">Active Buses</div></div>
-                    <div class="stat-box"><div class="stat-number">20</div><div class="stat-label">Total Fleet</div></div>
+                    <div class="stat-box"><div class="stat-number" id="activeBusCount">0</div><div class="stat-label">Active Transport</div></div>
+                    <div class="stat-box"><div class="stat-number" id="totalTransportCount">100</div><div class="stat-label">Total Transport</div></div>
                 </div>
             </div>
 
@@ -112,12 +139,12 @@
                     <div style="text-align:center"><div style="font-size:12px; color:#9aa4b2">ETA</div><div id="etaValue" style="font-size:18px; font-weight:600; color:#34d399; margin-top:4px">--</div></div>
                     <div style="text-align:center"><div style="font-size:12px; color:#9aa4b2">Walk Distance</div><div id="walkDistance" style="font-size:18px; font-weight:600; color:#667eea; margin-top:4px">--</div></div>
                 </div>
-                <div id="busesOnRoute" style="margin-top:12px; font-size:12px; color:#9aa4b2">🚌 Buses on route: <span id="busesOnRouteCount">-</span></div>
+                <div id="busesOnRoute" style="margin-top:12px; font-size:12px; color:#9aa4b2">🚌 Transports on route: <span id="busesOnRouteCount">-</span></div>
             </div>
 
             <div class="card">
-                <h3><span>🚍</span> Active Buses</h3>
-                <div class="active-buses" id="activeBuses"><div class="empty-state"><p>No buses currently active</p></div></div>
+                <h3><span>🚍</span> Active Transport</h3>
+                <div class="active-buses" id="activeBuses"><div class="empty-state"><p>No Transports currently active</p></div></div>
                 <div class="last-update">Last updated: <span id="lastUpdate">Loading...</span></div>
             </div>
         </div>
@@ -255,7 +282,7 @@
         }
         function buildBusPopup(busNum, busData) {
             const routeId = busRouteMap[busNum]; const route = getRouteById(routeId); const position = [busData.lat, busData.lng]; const status = determineStatus(busNum, position, busData.lastUpdate); const speed = computeSpeed(busNum, position, busData.lastUpdate); const nextStop = route ? getNextStopForRoute(route, position).name : null; const routeName = route ? route.name : '—'; const last = busData.lastUpdate ? new Date(busData.lastUpdate).toLocaleTimeString() : '—';
-            return `<div style="min-width:220px;background:#0f1220;color:#e6eef8;border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px"><div style="font-weight:600;margin-bottom:6px">Bus ${busNum}</div><div style="font-size:13px;color:#9aa4b2">Route: <span style="color:#dbeafe">${routeName}</span></div><div style="font-size:13px;color:#9aa4b2">Status: <span style="color:${status==='Moving'?'#34d399':status==='Idle'?'#fbbf24':'#fb7185'}">${status}</span></div><div style="font-size:13px;color:#9aa4b2">Last update: <span style="color:#dbeafe">${last}</span></div><div style="font-size:13px;color:#9aa4b2">Speed: <span style="color:#dbeafe">${speed? speed+' km/h' : '—'}</span></div><div style="font-size:13px;color:#9aa4b2">Next stop: <span style="color:#dbeafe">${nextStop || '—'}</span></div></div>`;
+            return `<div style="min-width:220px;background:#0f1220;color:#e6eef8;border:1px solid rgba(255,255,255,0.08);border-radius:10px;padding:10px"><div style="font-weight:600;margin-bottom:6px">Transport ${busNum}</div><div style="font-size:13px;color:#9aa4b2">Route: <span style="color:#dbeafe">${routeName}</span></div><div style="font-size:13px;color:#9aa4b2">Status: <span style="color:${status==='Moving'?'#34d399':status==='Idle'?'#fbbf24':'#fb7185'}">${status}</span></div><div style="font-size:13px;color:#9aa4b2">Last update: <span style="color:#dbeafe">${last}</span></div><div style="font-size:13px;color:#9aa4b2">Speed: <span style="color:#dbeafe">${speed? speed+' km/h' : '—'}</span></div><div style="font-size:13px;color:#9aa4b2">Next stop: <span style="color:#dbeafe">${nextStop || '—'}</span></div></div>`;
         }
 
         function updateLayerVisibility(layer, visible) {
@@ -319,6 +346,22 @@
                 const rEl = document.getElementById('currentRouteOverlay'); if(rEl) rEl.textContent = '—';
                 if (walkingLine) { try { map.removeLayer(walkingLine); } catch(e){} walkingLine = null; }
             }
+            // Blur non-selected route stops
+            try {
+                Object.entries(routePolylines).forEach(([id, marker]) => {
+                    if (!id.includes('-stop-')) return;
+                    const routeKey = id.split('-stop-')[0];
+                    const isSelectedRoute = selectedRouteId && String(routeKey) === String(selectedRouteId);
+                    if (marker && marker.getElement && marker.getElement()) {
+                        const el = marker.getElement();
+                        if (isSelectedRoute || !selectedRouteId) {
+                            el.classList.remove('stop-blur');
+                        } else {
+                            el.classList.add('stop-blur');
+                        }
+                    }
+                });
+            } catch(e) { /* ignore */ }
         }
 
         async function showRouteDetails(route) {
@@ -418,6 +461,15 @@
             computeAndShowStudentETA();
         }
 
+        async function loadMetrics(){
+            try{
+                const res = await fetch('/api/metrics');
+                const data = await res.json();
+                const el = document.getElementById('totalTransportCount');
+                if(el && typeof data.total_transports === 'number') el.textContent = data.total_transports;
+            }catch(e){ /* ignore */ }
+        }
+
         function initMap() {
             const bounds = [[20.339920625677212, 85.7964659296332], [20.37210882553945, 85.83388810783698]];
             map = L.map('map', { zoomControl: true, maxBounds: bounds, minZoom: 14 }).setView([20.3549, 85.8161], 15);
@@ -426,6 +478,7 @@
             if(userLocation){ updateUserMarker(userLocation); }
             updateBuses(); setInterval(updateBuses, 3000);
             loadHostels(); loadClasses(); loadRoutes(); loadBusRoutes();
+            loadMetrics();
             document.getElementById('hostelsToggle').addEventListener('change', (e) => { updateLayerVisibility('hostels', e.target.checked); });
             document.getElementById('classesToggle').addEventListener('change', (e) => { updateLayerVisibility('classes', e.target.checked); });
             document.getElementById('routesToggle').addEventListener('change', (e) => { updateLayerVisibility('routes', e.target.checked); });
@@ -467,7 +520,7 @@
                         const rid = (bus && bus.routeId != null) ? bus.routeId : busRouteMap[busNum];
                         const onSelectedRoute = selectedRouteId && String(rid) === String(selectedRouteId);
                         const icon = createIcon(busNum, color, onSelectedRoute ? 26 : 24, rotation, isTracked || onSelectedRoute);
-                        busMarkers[busNum] = L.marker(position, { icon: icon, title: `Bus ${busNum}` }).addTo(map);
+                        busMarkers[busNum] = L.marker(position, { icon: icon, title: `Transport ${busNum}` }).addTo(map);
                         prevBusRotation[busNum] = rotation;
                         prevTrackedState[busNum] = !!isTracked;
                         prevRouteSelState[busNum] = !!onSelectedRoute;
@@ -484,7 +537,7 @@
         }
 
         function updateActiveBusList(busNumbers, buses) {
-            const container = document.getElementById('activeBuses'); if (busNumbers.length === 0) { container.innerHTML = `<div class="empty-state"><p>No buses currently active</p></div>`; return; }
+            const container = document.getElementById('activeBuses'); if (busNumbers.length === 0) { container.innerHTML = `<div class="empty-state"><p>No Transports currently active</p></div>`; return; }
             container.innerHTML = '';
             busNumbers.sort((a, b) => parseInt(a) - parseInt(b));
             busNumbers.forEach(busNum => {
@@ -496,7 +549,7 @@
                 item.style.borderLeftColor = color;
                 item.onclick = () => { const position = [buses[busNum].lat, buses[busNum].lng]; map.setView(position, 17); };
                 const status = determineStatus(busNum, [buses[busNum].lat, buses[busNum].lng], buses[busNum].lastUpdate);
-                item.innerHTML = `<div class="bus-info"><div class="bus-dot" style="background-color: ${color}; transform:${onSelectedRoute ? 'scale(1.08)' : 'scale(1)'}">${busNum}</div><div class="bus-name">Bus ${busNum}</div></div><div class="bus-status"><div class="pulse"></div>${status}</div>`;
+                item.innerHTML = `<div class="bus-info"><div class="bus-dot" style="background-color: ${color}; transform:${onSelectedRoute ? 'scale(1.08)' : 'scale(1)'}">${busNum}</div><div class="bus-name">Transport ${busNum}</div></div><div class="bus-status"><div class="pulse"></div>${status}</div>`;
                 container.appendChild(item);
             });
         }

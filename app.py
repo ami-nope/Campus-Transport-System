@@ -77,6 +77,30 @@ def student_view():
     institute = creds.get('institute_name', 'INSTITUTE')
     return render_template('student.html', institute_name=institute)
 
+ 
+@app.route('/api/metrics', methods=['GET'])
+def get_metrics():
+    creds = load_credentials()
+    # Default to 100 if not set
+    total_transports = int(creds.get('total_transports', 100))
+    return jsonify({ 'total_transports': total_transports })
+
+ 
+@app.route('/api/metrics', methods=['POST'])
+@login_required
+def update_metrics():
+    data = request.json or {}
+    try:
+        total_transports = int(data.get('total_transports', None))
+    except (TypeError, ValueError):
+        return jsonify({ 'error': 'Invalid total_transports' }), 400
+    if total_transports is None or total_transports < 0:
+        return jsonify({ 'error': 'Provide non-negative total_transports' }), 400
+    creds = load_credentials()
+    creds['total_transports'] = total_transports
+    save_credentials(creds)
+    return jsonify({ 'status': 'success', 'total_transports': total_transports })
+
 
 @app.route('/admin')
 @login_required
@@ -262,6 +286,13 @@ def get_all_buses():
     with open(BUSES_FILE, 'r') as f:
         buses = json.load(f)
     return jsonify(buses)
+
+@app.route('/api/buses/clear', methods=['POST'])
+def clear_all_buses():
+    # Clear all bus entries by resetting the JSON file
+    with open(BUSES_FILE, 'w') as f:
+        json.dump({}, f)
+    return jsonify({'status': 'success'})
 
 @app.route('/api/locations', methods=['GET'])
 def get_locations():

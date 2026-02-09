@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Bus Tracker - Admin</title>
+    <title>Transport Tracker - Admin</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
@@ -93,10 +93,17 @@
                 <div style="font-weight:700; font-size:14px; color:#e6eef8">{{ institute_name | default('INSTITUTE') }} TRANSPORT SYSTEM</div>
                 <h1>🛣️ Route Builder</h1>
                 <p class="subtitle">Create routes by clicking on the map - no coordinates needed!</p>
+                <div class="controls" style="margin-top:8px">
+                    <label class="field-label" for="totalTransportsInput">Total Transports</label>
+                    <button id="decTotalTransports">−</button>
+                    <input id="totalTransportsInput" type="number" min="0" value="100" style="width:100px">
+                    <button id="incTotalTransports">+</button>
+                    <button id="saveTotalTransports" class="ok">Save</button>
+                </div>
             </div>
             <div style="text-align:right">
-                <a href="/" style="color:#9aa4b2; text-decoration:none; margin-right:12px">Student View</a>
-                <a href="/driver" style="color:#9aa4b2; text-decoration:none; margin-right:12px">Driver View</a>
+                <a href="/" target="_blank" rel="noopener noreferrer" style="color:#9aa4b2; text-decoration:none; margin-right:12px">Student View</a>
+                <a href="/driver" target="_blank" rel="noopener noreferrer" style="color:#9aa4b2; text-decoration:none; margin-right:12px">Driver View</a>
                 <button onclick="showUsersSection()" style="background:#34d399;color:#042017;margin-right:12px;padding:8px 16px;border-radius:8px;border:none;cursor:pointer">Users</button>
                 {% if admin_user %}
                     <span style="color:#9aa4b2; margin-right:8px">{{ admin_user }}</span>
@@ -109,7 +116,7 @@
 
         <div class="tabs">
             <div class="tab" data-tab="routes"><span class="icon">🗺️</span> Create Route</div>
-            <div class="tab active" data-tab="buses"><span class="icon">🚌</span> Manage Buses</div>
+            <div class="tab active" data-tab="buses"><span class="icon">🚌</span> Manage Transports</div>
             <div class="tab" data-tab="buildings"><span class="icon">🏠</span> Buildings</div>
         </div>
         <div id="usersSection" style="display:none;background:#07101a;padding:18px;border-radius:8px;margin-bottom:18px">
@@ -218,6 +225,32 @@
             if(btn) btn.textContent = isPwd ? 'Hide' : 'Show';
         }
         </script>
+        <script>
+        
+        async function loadTotalTransports(){
+            try{
+                const res = await fetch('/api/metrics');
+                const data = await res.json();
+                const val = typeof data.total_transports === 'number' ? data.total_transports : 100;
+                const input = document.getElementById('totalTransportsInput');
+                if(input) input.value = val;
+            }catch(e){ /* ignore */ }
+        }
+        function initTotalTransportControls(){
+            const input = document.getElementById('totalTransportsInput');
+            const dec = document.getElementById('decTotalTransports');
+            const inc = document.getElementById('incTotalTransports');
+            const save = document.getElementById('saveTotalTransports');
+            if(dec) dec.addEventListener('click', ()=>{ const v = Math.max(0, parseInt(input.value||'0')-1); input.value = v; });
+            if(inc) inc.addEventListener('click', ()=>{ const v = Math.max(0, parseInt(input.value||'0')+1); input.value = v; });
+            if(save) save.addEventListener('click', async ()=>{
+                const v = Math.max(0, parseInt(input.value||'0'));
+                await fetch('/api/metrics', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ total_transports: v }) });
+                alert('Saved');
+            });
+        }
+        document.addEventListener('DOMContentLoaded', ()=>{ loadTotalTransports(); initTotalTransportControls(); });
+        </script>
 
         <!-- ROUTES TAB -->
         <div id="routes" class="tab-content">
@@ -288,18 +321,19 @@
             <div class="routes-grid" id="routesList"></div>
         </div>
 
-        <!-- BUSES TAB -->
+        <!-- TRANSPORTS TAB -->
         <div id="buses" class="tab-content active">
             <div class="controls">
-                <input id="newBusNum" placeholder="Bus number (e.g. 21)" style="width:140px">
+                <input id="newBusNum" placeholder="Transport number (e.g. 21)" style="width:140px">
                 <input id="newLat" placeholder="Latitude" style="width:160px">
                 <input id="newLng" placeholder="Longitude" style="width:160px">
-                <button id="addBtn" class="ok">Add Bus</button>
+                <button id="addBtn" class="ok">Add Transport</button>
                 <div style="flex:1"></div>
                 <button id="refreshBtn">Refresh</button>
+                <button id="clearAllBtn" class="danger">Clear All</button>
             </div>
             <div id="busList">
-                <div class="empty">Loading buses...</div>
+                <div class="empty">Loading transports...</div>
             </div>
         </div>
 
@@ -372,10 +406,14 @@
                 if (tab.getAttribute('data-tab') === 'routes') {
                     setTimeout(initRouteMap, 100);
                     loadRoutes();
+                    stopBusesAutoRefresh();
                 } else if (tab.getAttribute('data-tab') === 'buildings') {
                     setTimeout(initBuildingsMap, 100);
                     loadHostels();
                     loadClasses();
+                    stopBusesAutoRefresh();
+                } else if (tab.getAttribute('data-tab') === 'buses') {
+                    startBusesAutoRefresh();
                 }
             });
         });
@@ -429,7 +467,7 @@
             const instructions = {
                 start: {
                     main: '📍 Step 1: Set START point',
-                    sub: 'Click ONE spot on the map - this is where the bus starts'
+                    sub: 'Click ONE spot on the map - this is where the transport starts'
                 },
                 stops: {
                     main: '🛑 Step 2: Add STOPS',
@@ -687,14 +725,14 @@
             const keys = Object.keys(buses).sort((a,b) => parseInt(a)-parseInt(b));
             const container = document.getElementById('busList');
             if (keys.length === 0) {
-                container.innerHTML = '<div class="empty">No active buses</div>';
+                container.innerHTML = '<div class="empty">No active transports</div>';
                 return;
             }
-            let html = '<table><thead><tr><th>Bus</th><th>Latitude</th><th>Longitude</th><th>Last Update</th><th></th></tr></thead><tbody>';
+            let html = '<table><thead><tr><th>Transport</th><th>Latitude</th><th>Longitude</th><th>Last Update</th><th></th></tr></thead><tbody>';
             keys.forEach(k => {
                 const b = buses[k];
                 html += `<tr data-bus="${k}">`;
-                html += `<td><strong>Bus ${k}</strong></td>`;
+                html += `<td><strong>Transport ${k}</strong></td>`;
                 html += `<td><input class="lat" value="${b.lat}" style="width:140px"></td>`;
                 html += `<td><input class="lng" value="${b.lng}" style="width:140px"></td>`;
                 html += `<td class="small muted">${b.lastUpdate || ''}</td>`;
@@ -730,11 +768,16 @@
         }
 
         document.getElementById('refreshBtn').addEventListener('click', loadBuses);
+        document.getElementById('clearAllBtn').addEventListener('click', async () => {
+            if (!confirm('Clear all transports?')) return;
+            await fetch('/api/buses/clear', { method: 'POST' });
+            await loadBuses();
+        });
         document.getElementById('addBtn').addEventListener('click', async () => {
             const num = document.getElementById('newBusNum').value.trim();
             const lat = parseFloat(document.getElementById('newLat').value);
             const lng = parseFloat(document.getElementById('newLng').value);
-            if (!num || isNaN(lat) || isNaN(lng)) { alert('Provide bus number and coords'); return; }
+            if (!num || isNaN(lat) || isNaN(lng)) { alert('Provide transport number and coords'); return; }
             await fetch(`/api/bus/${num}`, {
                 method: 'POST', headers: {'Content-Type':'application/json'},
                 body: JSON.stringify({ lat: lat, lng: lng, lastUpdate: new Date().toISOString() })
@@ -745,7 +788,29 @@
             await loadBuses();
         });
 
+        // Auto-refresh for transports list
+        let busesAutoRefreshId = null;
+        let isBusesRefreshing = false;
+        function startBusesAutoRefresh(){
+            stopBusesAutoRefresh();
+            busesAutoRefreshId = setInterval(async ()=>{
+                const busesTab = document.getElementById('buses');
+                const busListEl = document.getElementById('busList');
+                if(!busesTab || !busesTab.classList.contains('active')) return;
+                if(document.hidden) return;
+                if(isBusesRefreshing) return;
+                const activeEl = document.activeElement;
+                if(activeEl && busListEl && busListEl.contains(activeEl) && (activeEl.tagName==='INPUT' || activeEl.tagName==='BUTTON')) return;
+                try{ isBusesRefreshing = true; await loadBuses(); } finally { isBusesRefreshing = false; }
+            }, 3000);
+        }
+        function stopBusesAutoRefresh(){
+            if(busesAutoRefreshId){ try{ clearInterval(busesAutoRefreshId); }catch(e){} busesAutoRefreshId = null; }
+        }
+
+        // Initial load and start auto refresh (buses tab is active by default)
         loadBuses();
+        startBusesAutoRefresh();
 
         // ==== BUILDINGS MAP ====
         function initBuildingsMap() {

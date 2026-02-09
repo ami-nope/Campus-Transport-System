@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Bus Tracker - Driver App</title>
+    <title>Transport Tracker - Driver App</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -127,9 +127,9 @@
         <p class="subtitle">Campus Shuttle Tracking</p>
 
         <div class="bus-selector">
-            <label for="busNumber">Select Your Bus Number:</label>
+            <label for="busNumber">Select Your Transport Number:</label>
             <select id="busNumber">
-                <option value="">-- Choose Bus --</option>
+                <option value="">-- Choose Transport --</option>
             </select>
         </div>
 
@@ -166,10 +166,10 @@
 
         <div class="info">
             <p><strong>ℹ️ How it works:</strong></p>
-            <p>• Select your bus number from the dropdown</p>
+            <p>• Select your transport number from the dropdown</p>
             <p>• Click "Start Shift" to begin tracking</p>
             <p>• Your location updates automatically</p>
-            <p>• Students can see your bus on the map</p>
+            <p>• Students can see your transport on the map</p>
             <p>• Click "End Shift" when done</p>
         </div>
     </div>
@@ -271,22 +271,33 @@
         function highlightRoute(routeId){
             Object.entries(routesPolylinesMap).forEach(([id,obj])=>{
                 try{
-                    if(id===routeId){ obj.polyline.setStyle({ opacity:1, weight:4 }); obj.stops.forEach(s=>s.setStyle({ opacity:1, fillOpacity:0.9 })); }
-                    else { obj.polyline.setStyle({ opacity:0.08, weight:2 }); obj.stops.forEach(s=>s.setStyle({ opacity:0.2, fillOpacity:0.2 })); }
+                    if(String(id)===String(routeId)){
+                        // Ensure selected route is visible
+                        if(obj.polyline && !driverMap.hasLayer(obj.polyline)) obj.polyline.addTo(routesLayer);
+                        obj.polyline.setStyle({ opacity:1, weight:4 });
+                        obj.stops.forEach(s=>{
+                            if(!driverMap.hasLayer(s)) s.addTo(routesLayer);
+                            s.setStyle({ opacity:1, fillOpacity:0.9 });
+                        });
+                    } else {
+                        // Hide non-selected routes entirely
+                        if(obj.polyline) obj.polyline.remove();
+                        obj.stops.forEach(s=>{ try{ s.remove(); }catch(e){} });
+                    }
                 }catch(e){}
             });
             // if driver marker exists, focus map to driver and keep following
             if(driverMarker && routeId){ try{ driverMap.setView(driverMarker.getLatLng(), Math.max(driverMap.getZoom(),15)); }catch(e){} }
         }
 
-        // Bus selector
-        for(let i=1;i<=20;i++){ const o=document.createElement('option'); o.value=i; o.textContent=`Bus ${i}`; busSelect.appendChild(o); }
+        //
+        for(let i=1;i<=20;i++){ const o=document.createElement('option'); o.value=i; o.textContent=`Transport ${i}`; busSelect.appendChild(o); }
 
         // Route select behavior
         routeSelect.addEventListener('change', async (e)=>{
             selectedRoute = e.target.value;
             if(selectedBus && selectedRoute){
-                try{ await fetch(`/api/bus/${selectedBus}/route`, { method:'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ routeId: selectedRoute }) }); console.log(`Bus ${selectedBus} assigned to route ${selectedRoute}`); }catch(err){ console.error(err); }
+                try{ await fetch(`/api/bus/${selectedBus}/route`, { method:'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ routeId: selectedRoute }) }); console.log(`Transport ${selectedBus} assigned to route ${selectedRoute}`); }catch(err){ console.error(err); }
             }
             // Highlight only the chosen route and follow driver
             if(selectedRoute) highlightRoute(selectedRoute);
@@ -295,7 +306,7 @@
         // Start tracking
         function startTracking(){
             selectedBus = busSelect.value;
-            if(!selectedBus){ alert('Please select a bus number first!'); return; }
+            if(!selectedBus){ alert('Please select a transport number first!'); return; }
             if(!navigator.geolocation){ alert('Geolocation not supported'); return; }
 
             watchId = navigator.geolocation.watchPosition((pos)=>{
@@ -326,7 +337,7 @@
                         }catch(e){ /* ignore */ }
                     }, BACKGROUND_INTERVAL);
 
-            document.getElementById('trackingStatus').textContent = `Active - Bus ${selectedBus}`;
+            document.getElementById('trackingStatus').textContent = `Active - Transport ${selectedBus}`;
             document.getElementById('statusDot').classList.add('active'); document.getElementById('statusDot').classList.remove('inactive');
             document.getElementById('startBtn').disabled = true; document.getElementById('stopBtn').disabled = false; busSelect.disabled = true;
             // keep routeSelect enabled so driver can choose route while tracking
@@ -335,7 +346,7 @@
         function stopTracking(){
             if(watchId){ navigator.geolocation.clearWatch(watchId); watchId=null; }
                 if(backgroundTimerId){ try{ clearInterval(backgroundTimerId); }catch(e){} backgroundTimerId=null; }
-            if(selectedBus){ fetch(`/api/bus/${selectedBus}`, { method:'DELETE' }).then(()=>console.log(`Bus ${selectedBus} removed`)); }
+            if(selectedBus){ fetch(`/api/bus/${selectedBus}`, { method:'DELETE' }).then(()=>console.log(`Transport ${selectedBus} removed`)); }
             document.getElementById('trackingStatus').textContent='Inactive'; document.getElementById('statusDot').classList.remove('active'); document.getElementById('statusDot').classList.add('inactive');
             document.getElementById('startBtn').disabled=false; document.getElementById('stopBtn').disabled=true; busSelect.disabled=false; updateCount=0; document.getElementById('updateCount').textContent='0';
         }
