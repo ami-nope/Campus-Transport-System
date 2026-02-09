@@ -186,8 +186,8 @@
         let latestBuses = {};
         let sseConnected = false;
         let busesPollTimerId = null;
-        const POLL_INTERVAL_MS = 5000;   // slower polling
-        const RESYNC_INTERVAL_MS = 20000; // occasional full resync even with SSE
+        const POLL_INTERVAL_MS = 2000;   // fast polling for responsiveness
+        const RESYNC_INTERVAL_MS = 10000; // occasional full resync even with SSE
         const OFFLINE_MS = 15000; // remove buses after ~15 seconds of no updates
         const colors = [
             '#FF3B30', '#34C759', '#007AFF', '#FF9500', '#AF52DE',
@@ -205,7 +205,7 @@
 
         // Tween state for smooth marker movement
         const busTweens = {}; // busNum -> { from:[lat,lng], to:[lat,lng], start:number, dur:number }
-        const TWEEN_MS = 3000;
+        const TWEEN_MS = 800;
         function easeInOut(t){ return t<0.5 ? 2*t*t : -1+(4-2*t)*t; }
         function queueBusTween(busNum, toPos){
             try{

@@ -2,177 +2,251 @@
 <html>
 <head>
 <title>Bus Simulator</title>
-
-<link
-  rel="stylesheet"
-  href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-/>
-
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
-body { margin:0; background:#0f0f23; color:white; font-family:sans-serif; }
+body { margin:0; background:#0f0f23; color:#e6eef8; font-family:'Segoe UI',sans-serif; }
 #map { height:100vh; }
-
 .controls {
-  position:absolute;
-  top:12px;
-  left:12px;
-  background:#1a1a2e;
-  padding:10px;
-  border-radius:8px;
-  z-index:1000;
+  position:absolute; top:12px; left:12px; background:rgba(18,24,38,0.92);
+  padding:14px 16px; border-radius:12px; z-index:1000; min-width:220px;
+  border:1px solid rgba(255,255,255,0.08); backdrop-filter:blur(12px);
+  box-shadow:0 8px 32px rgba(0,0,0,0.5);
 }
+.controls label { display:block; font-size:12px; color:#9aa4b2; margin-top:8px; }
+.controls select, .controls input[type=number] {
+  width:100%; padding:6px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.1);
+  background:#0f0f23; color:#e6eef8; font-size:13px; margin-top:2px;
+}
+.controls input[type=range] { width:100%; margin-top:2px; }
+.speed-row { display:flex; align-items:center; gap:8px; margin-top:4px; }
+.speed-val { font-size:14px; font-weight:600; color:#34d399; min-width:36px; text-align:right; }
+.keys-hint { font-size:11px; color:#667; margin-top:10px; line-height:1.6; }
+.keys-hint kbd {
+  background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:4px;
+  border:1px solid rgba(255,255,255,0.15); font-family:monospace; font-size:11px;
+}
+.status-dot { display:inline-block; width:6px; height:6px; border-radius:50%; background:#34d399; margin-right:6px;
+  box-shadow:0 0 6px rgba(52,211,153,0.5); }
+#syncStatus { font-size:11px; color:#9aa4b2; margin-top:8px; }
 </style>
 </head>
 <body>
 
 <div class="controls">
-Bus:
-<select id="busSelect"></select>
-Route:
-<select id="routeSelect"></select>
-<div>Use WASD to drive</div>
-<div style="margin-top:8px">Speed: <input type="range" id="speedMul" min="0.25" max="3" step="0.25" value="1"/> <span id="speedMulLabel">1x</span></div>
+  <div style="font-weight:600; font-size:14px; margin-bottom:6px;">🚍 Bus Simulator</div>
+
+  <label>Bus Number
+    <select id="busSelect"></select>
+  </label>
+
+  <label>Route
+    <select id="routeSelect"><option value="">— None —</option></select>
+  </label>
+
+  <label>Speed Multiplier
+    <div class="speed-row">
+      <input type="range" id="speedSlider" min="0.5" max="10" step="0.5" value="2"/>
+      <span class="speed-val" id="speedLabel">2x</span>
+    </div>
+  </label>
+
+  <label>Custom Speed (km/h)
+    <input type="number" id="customSpeed" min="0" max="200" step="5" placeholder="Leave empty for WASD mode"/>
+  </label>
+
+  <div class="keys-hint">
+    <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to drive<br>
+    <kbd>Shift</kbd> to boost &nbsp; <kbd>Space</kbd> to brake
+  </div>
+
+  <div id="syncStatus"><span class="status-dot"></span>Syncing...</div>
 </div>
 
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
 <script>
-let lat = 20.3549;
-let lng = 85.8161;
+// --- State ---
+let lat = 20.3549, lng = 85.8161;
 let bus = 1;
 let currentRouteId = null;
+let vx = 0, vy = 0; // velocity in lat/lng per second
+let speedMul = 2.0;
 
-let velocityLat = 0;
-let velocityLng = 0;
+// Physics tuned for smooth, consistent movement
+const BASE_SPEED = 0.00004;  // base speed in degrees/sec (~4.4 m/s ≈ 16 km/h at equator)
+const FRICTION = 0.88;       // per-frame damping (lower = more responsive stops)
+const BOOST = 2.5;           // shift multiplier
 
-// Slightly higher speed and smoother inertia
-// Base acceleration and damping; multiplier will scale this
-const baseAccel = 0.00000012; // gentle acceleration
-const friction = 0.96;        // damping
-let speedMultiplier = 1.0;     // UI-controlled multiplier
-
+// --- Map ---
 const map = L.map("map").setView([lat, lng], 16);
-
-// Dark mode basemap
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { maxZoom:19, attribution:'' }).addTo(map);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', { maxZoom:19 }).addTo(map);
 
-const marker = L.marker([lat, lng]).addTo(map);
+const marker = L.circleMarker([lat, lng], {
+  radius: 8, color: '#34d399', weight: 3, fillColor: '#34d399', fillOpacity: 0.9
+}).addTo(map);
 
-function loadBusOptions() {
-  const select = document.getElementById("busSelect");
-  for (let i=1;i<=20;i++) {
-    const o=document.createElement("option");
-    o.value=i;
-    o.text="Bus "+i;
-    select.appendChild(o);
+// Trail for visual feedback
+const trail = L.polyline([], { color: '#34d39955', weight: 2, dashArray: '4,4' }).addTo(map);
+const trailPoints = [];
+const MAX_TRAIL = 200;
+
+// --- Controls ---
+function initBusSelect() {
+  const sel = document.getElementById("busSelect");
+  for (let i = 1; i <= 20; i++) {
+    const o = document.createElement("option");
+    o.value = i; o.text = "Bus " + i;
+    sel.appendChild(o);
   }
-  select.onchange=()=>bus=select.value;
+  sel.onchange = () => { bus = parseInt(sel.value); };
 }
 
-async function loadRoutes() {
-  const res = await fetch("/api/routes");
-  const routes = await res.json();
-  const select = document.getElementById("routeSelect");
-
-  routes.forEach(r=>{
-    const o=document.createElement("option");
-    o.value=r.id;
-    o.text=r.name;
-    select.appendChild(o);
-  });
-
-  select.onchange=()=>{
-    currentRouteId = select.value;
-    fetch(`/api/bus/${bus}/route`,{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({routeId: currentRouteId})
+async function initRouteSelect() {
+  try {
+    const res = await fetch("/api/routes");
+    const routes = await res.json();
+    const sel = document.getElementById("routeSelect");
+    routes.forEach(r => {
+      const o = document.createElement("option");
+      o.value = r.id; o.text = r.name;
+      sel.appendChild(o);
     });
-  };
+    sel.onchange = () => {
+      currentRouteId = sel.value || null;
+      if (currentRouteId) {
+        fetch(`/api/bus/${bus}/route`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ routeId: currentRouteId })
+        }).catch(() => {});
+      }
+    };
+  } catch (e) { console.warn("Failed to load routes:", e); }
 }
 
-loadBusOptions();
-loadRoutes();
+// Speed slider
+const speedSlider = document.getElementById('speedSlider');
+const speedLabel = document.getElementById('speedLabel');
+speedSlider.addEventListener('input', () => {
+  speedMul = parseFloat(speedSlider.value);
+  speedLabel.textContent = speedMul + 'x';
+});
 
+// Custom speed input
+const customSpeedInput = document.getElementById('customSpeed');
+
+// Try to center on user location
 navigator.geolocation.getCurrentPosition((pos) => {
   lat = pos.coords.latitude;
   lng = pos.coords.longitude;
-  map.setView([lat,lng],16);
-  marker.setLatLng([lat,lng]);
+  map.setView([lat, lng], 16);
+  marker.setLatLng([lat, lng]);
 });
 
+// --- Input ---
 const keys = {};
-document.addEventListener("keydown", e => keys[e.key.toLowerCase()] = true);
-document.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+document.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; e.preventDefault(); });
+document.addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
 
-// Smooth animation with requestAnimationFrame and throttled network updates
+// --- Animation Loop ---
 let lastFrame = performance.now();
-let lastSent = 0;
-const SEND_MS = 300; // throttle network updates
+let lastSend = 0;
+const SEND_INTERVAL = 200; // ms between server updates
 
-// Wire up speed multiplier control
-const speedMulInput = document.getElementById('speedMul');
-const speedMulLabel = document.getElementById('speedMulLabel');
-if (speedMulInput) {
-  speedMulInput.addEventListener('input', () => {
-    speedMultiplier = parseFloat(speedMulInput.value) || 1.0;
-    if (speedMulLabel) speedMulLabel.textContent = `${speedMultiplier.toFixed(2)}x`;
-  });
-}
-
-function animate() {
-  const now = performance.now();
-  const dt = Math.max(0.016, (now - lastFrame) / 1000); // seconds
+function animate(now) {
+  const dt = Math.min(0.1, (now - lastFrame) / 1000); // cap at 100ms to avoid jumps
   lastFrame = now;
 
-  // Acceleration based on input
-  const effectiveAccel = baseAccel * speedMultiplier;
-  if (keys["w"]) velocityLat += effectiveAccel;
-  if (keys["s"]) velocityLat -= effectiveAccel;
-  if (keys["a"]) velocityLng -= effectiveAccel;
-  if (keys["d"]) velocityLng += effectiveAccel;
+  const customKmh = parseFloat(customSpeedInput.value);
+  const boost = keys["shift"] ? BOOST : 1;
 
-  // Apply friction smoothly
-  velocityLat *= friction;
-  velocityLng *= friction;
+  if (customKmh > 0) {
+    // Custom speed mode: constant velocity in the current direction
+    const speedDegPerSec = (customKmh / 3.6) / 111320; // convert km/h to degrees/sec
+    let dx = 0, dy = 0;
+    if (keys["w"]) dy = 1;
+    if (keys["s"]) dy = -1;
+    if (keys["d"]) dx = 1;
+    if (keys["a"]) dx = -1;
 
-  // Integrate position
-  lat += velocityLat;
-  lng += velocityLng;
+    // Normalize diagonal movement
+    const mag = Math.sqrt(dx * dx + dy * dy) || 1;
+    dx /= mag; dy /= mag;
 
-  // Update marker smoothly
-  marker.setLatLng([lat,lng]);
-
-  // Soft-follow: only pan if near edges
-  try {
-    const pix = map.latLngToContainerPoint([lat,lng]);
-    const size = map.getSize();
-    const margin = 36;
-    if (pix.x < margin || pix.x > size.x - margin || pix.y < margin || pix.y > size.y - margin) {
-      map.panTo([lat,lng], { animate: true });
+    if (dx !== 0 || dy !== 0) {
+      lat += dy * speedDegPerSec * boost * dt;
+      lng += dx * speedDegPerSec * boost * dt;
     }
-  } catch(e) {}
+  } else {
+    // WASD physics mode
+    const accel = BASE_SPEED * speedMul * boost;
 
-  // Throttled server updates for smoothness
-  if (now - lastSent >= SEND_MS) {
-    lastSent = now;
+    if (keys["w"]) vy += accel * dt * 60;
+    if (keys["s"]) vy -= accel * dt * 60;
+    if (keys["d"]) vx += accel * dt * 60;
+    if (keys["a"]) vx -= accel * dt * 60;
+
+    // Brake
+    if (keys[" "]) {
+      vx *= 0.85;
+      vy *= 0.85;
+    }
+
+    // Apply friction
+    const f = Math.pow(FRICTION, dt * 60);
+    vx *= f;
+    vy *= f;
+
+    // Clamp tiny velocities to zero to avoid micro-drift
+    if (Math.abs(vx) < 1e-9) vx = 0;
+    if (Math.abs(vy) < 1e-9) vy = 0;
+
+    lat += vy * dt * 60;
+    lng += vx * dt * 60;
+  }
+
+  // Update marker
+  marker.setLatLng([lat, lng]);
+
+  // Trail
+  trailPoints.push([lat, lng]);
+  if (trailPoints.length > MAX_TRAIL) trailPoints.shift();
+  trail.setLatLngs(trailPoints);
+
+  // Soft camera follow — pan only when near edge
+  try {
+    const px = map.latLngToContainerPoint([lat, lng]);
+    const sz = map.getSize();
+    const m = 60;
+    if (px.x < m || px.x > sz.x - m || px.y < m || px.y > sz.y - m) {
+      map.panTo([lat, lng], { animate: true, duration: 0.3 });
+    }
+  } catch (e) {}
+
+  // Send updates to server
+  if (now - lastSend >= SEND_INTERVAL) {
+    lastSend = now;
     const payload = { lat, lng, lastUpdate: new Date().toISOString() };
-    if (currentRouteId) payload.routeId = currentRouteId; // only include when set
+    if (currentRouteId) payload.routeId = currentRouteId;
     fetch(`/api/bus/${bus}`, {
       method: "POST",
-      headers: {"Content-Type":"application/json"},
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
-    }).catch(()=>{});
+    }).then(() => {
+      document.getElementById('syncStatus').innerHTML = '<span class="status-dot"></span>Synced';
+    }).catch(() => {
+      document.getElementById('syncStatus').innerHTML = '<span class="status-dot" style="background:#fb7185"></span>Offline';
+    });
   }
 
   requestAnimationFrame(animate);
 }
 
+initBusSelect();
+initRouteSelect();
 requestAnimationFrame(animate);
 </script>
-
 </body>
 </html>
