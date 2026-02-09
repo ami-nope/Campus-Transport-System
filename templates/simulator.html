@@ -19,7 +19,16 @@ body { margin:0; background:#0f0f23; color:#e6eef8; font-family:'Segoe UI',sans-
 }
 .controls input[type=range] { width:100%; margin-top:2px; }
 .speed-row { display:flex; align-items:center; gap:8px; margin-top:4px; }
-.speed-val { font-size:14px; font-weight:600; color:#34d399; min-width:36px; text-align:right; }
+.speed-row input[type=range] { flex:1; min-width:0; }
+.speed-row input[type=number] {
+  width:64px; flex:none; padding:4px 6px; border-radius:6px;
+  border:1px solid rgba(255,255,255,0.1); background:#0f0f23;
+  color:#34d399; font-size:13px; font-weight:600; text-align:center;
+  -moz-appearance:textfield;
+}
+.speed-row input[type=number]::-webkit-inner-spin-button,
+.speed-row input[type=number]::-webkit-outer-spin-button { opacity:1; }
+.speed-unit { font-size:11px; color:#667; flex:none; }
 .keys-hint { font-size:11px; color:#667; margin-top:10px; line-height:1.6; }
 .keys-hint kbd {
   background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:4px;
@@ -43,15 +52,12 @@ body { margin:0; background:#0f0f23; color:#e6eef8; font-family:'Segoe UI',sans-
     <select id="routeSelect"><option value="">— None —</option></select>
   </label>
 
-  <label>Speed Multiplier
+  <label>Speed (km/h)
     <div class="speed-row">
-      <input type="range" id="speedSlider" min="0.01" max="10" step="0.01" value="5"/>
-      <span class="speed-val" id="speedLabel">5x</span>
+      <input type="range" id="speedSlider" min="1" max="200" step="1" value="50"/>
+      <input type="number" id="customSpeed" min="1" max="200" step="1" value="50"/>
+      <span class="speed-unit">km/h</span>
     </div>
-  </label>
-
-  <label>Custom Speed (km/h)
-    <input type="number" id="customSpeed" min="0" max="200" step="1" placeholder="Leave empty for WASD mode"/>
   </label>
 
   <div class="keys-hint">
@@ -70,12 +76,8 @@ body { margin:0; background:#0f0f23; color:#e6eef8; font-family:'Segoe UI',sans-
 let lat = 20.3549, lng = 85.8161;
 let bus = 1;
 let currentRouteId = null;
-let vx = 0, vy = 0; // velocity in lat/lng per second
-let speedMul = 5.0;
 
-// Physics tuned for smooth, consistent movement
-const BASE_SPEED = 0.000004;  // base speed in degrees/sec (10% of original)
-const FRICTION = 0.88;       // per-frame damping (lower = more responsive stops)
+// Physics
 const BOOST = 2.5;           // shift multiplier
 
 // --- Map ---
@@ -172,16 +174,21 @@ async function initRouteSelect() {
   } catch (e) { console.warn("Failed to load routes:", e); }
 }
 
-// Speed slider
+// Speed controls — slider and number input are synced (both in km/h)
 const speedSlider = document.getElementById('speedSlider');
-const speedLabel = document.getElementById('speedLabel');
-speedSlider.addEventListener('input', () => {
-  speedMul = parseFloat(speedSlider.value);
-  speedLabel.textContent = speedMul + 'x';
-});
-
-// Custom speed input
 const customSpeedInput = document.getElementById('customSpeed');
+let targetKmh = 50; // current speed in km/h
+
+function setSpeed(kmh) {
+  kmh = Math.max(1, Math.min(200, Math.round(kmh)));
+  targetKmh = kmh;
+  speedSlider.value = kmh;
+  customSpeedInput.value = kmh;
+}
+
+speedSlider.addEventListener('input', () => { setSpeed(parseFloat(speedSlider.value)); });
+customSpeedInput.addEventListener('input', () => { setSpeed(parseFloat(customSpeedInput.value) || 1); });
+customSpeedInput.addEventListener('change', () => { setSpeed(parseFloat(customSpeedInput.value) || 1); });
 
 // Try to center on user location
 navigator.geolocation.getCurrentPosition((pos) => {
@@ -205,52 +212,22 @@ function animate(now) {
   const dt = Math.min(0.1, (now - lastFrame) / 1000); // cap at 100ms to avoid jumps
   lastFrame = now;
 
-  const customKmh = parseFloat(customSpeedInput.value);
   const boost = keys["shift"] ? BOOST : 1;
+  const speedDegPerSec = (targetKmh / 3.6) / 111320; // convert km/h to degrees/sec
 
-  if (customKmh > 0) {
-    // Custom speed mode: constant velocity in the current direction
-    const speedDegPerSec = (customKmh / 3.6) / 111320; // convert km/h to degrees/sec
-    let dx = 0, dy = 0;
-    if (keys["w"]) dy = 1;
-    if (keys["s"]) dy = -1;
-    if (keys["d"]) dx = 1;
-    if (keys["a"]) dx = -1;
+  let dx = 0, dy = 0;
+  if (keys["w"]) dy = 1;
+  if (keys["s"]) dy = -1;
+  if (keys["d"]) dx = 1;
+  if (keys["a"]) dx = -1;
 
-    // Normalize diagonal movement
-    const mag = Math.sqrt(dx * dx + dy * dy) || 1;
-    dx /= mag; dy /= mag;
+  // Normalize diagonal movement
+  const mag = Math.sqrt(dx * dx + dy * dy) || 1;
+  dx /= mag; dy /= mag;
 
-    if (dx !== 0 || dy !== 0) {
-      lat += dy * speedDegPerSec * boost * dt;
-      lng += dx * speedDegPerSec * boost * dt;
-    }
-  } else {
-    // WASD physics mode
-    const accel = BASE_SPEED * speedMul * boost;
-
-    if (keys["w"]) vy += accel * dt * 60;
-    if (keys["s"]) vy -= accel * dt * 60;
-    if (keys["d"]) vx += accel * dt * 60;
-    if (keys["a"]) vx -= accel * dt * 60;
-
-    // Brake
-    if (keys[" "]) {
-      vx *= 0.85;
-      vy *= 0.85;
-    }
-
-    // Apply friction
-    const f = Math.pow(FRICTION, dt * 60);
-    vx *= f;
-    vy *= f;
-
-    // Clamp tiny velocities to zero to avoid micro-drift
-    if (Math.abs(vx) < 1e-9) vx = 0;
-    if (Math.abs(vy) < 1e-9) vy = 0;
-
-    lat += vy * dt * 60;
-    lng += vx * dt * 60;
+  if (dx !== 0 || dy !== 0) {
+    lat += dy * speedDegPerSec * boost * dt;
+    lng += dx * speedDegPerSec * boost * dt;
   }
 
   // Update marker
