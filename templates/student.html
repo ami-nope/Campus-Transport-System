@@ -422,6 +422,11 @@
             return `${m}:${String(s).padStart(2,'0')}`;
         }
 
+        // ETA smoothing to avoid flicker
+        let studentEtaSmooth = null; let studentEtaLastTs = 0; const STUD_ETA_ALPHA = 0.35; const STUD_ETA_UPDATE_MS = 1500; const STUD_ETA_MIN_STEP = 3;
+        function smoothStudentEta(secs){ if(!isFinite(secs)) return secs; if(studentEtaSmooth==null){ studentEtaSmooth = secs; return secs; } const sm = STUD_ETA_ALPHA*secs + (1-STUD_ETA_ALPHA)*studentEtaSmooth; if(Math.abs(sm-studentEtaSmooth) < STUD_ETA_MIN_STEP){ studentEtaSmooth = studentEtaSmooth + Math.sign(sm-studentEtaSmooth) * STUD_ETA_MIN_STEP; } else { studentEtaSmooth = sm; } return Math.max(0, Math.round(studentEtaSmooth)); }
+        function maybeUpdateStudentEta(html){ const now = Date.now(); if(now - studentEtaLastTs >= STUD_ETA_UPDATE_MS){ const etaEl = document.getElementById('etaValue'); const etaOverlay = document.getElementById('etaOverlay'); if(etaEl) etaEl.innerHTML = html; if(etaOverlay) etaOverlay.innerHTML = html; studentEtaLastTs = now; } }
+
         async function computeAndShowStudentETA(){
             const etaEl = document.getElementById('etaValue'); const etaOverlay = document.getElementById('etaOverlay'); if(etaEl) etaEl.textContent='--'; if(etaOverlay) etaOverlay.textContent='--';
             const busesData = await fetch('/api/buses').then(r=>r.json()).catch(()=>({}));
@@ -471,21 +476,21 @@
                 speedTitle = '';
             } else if (speedKmh && speedKmh > 0.1) {
                 const seconds = Math.ceil(((distMeters/1000) / speedKmh) * 3600);
-                displayText = formatMinSec(seconds);
+                const smoothed = smoothStudentEta(seconds);
+                displayText = formatMinSec(smoothed);
                 speedFrag = ` • ${speedKmh} km/h`;
                 speedTitle = '';
             } else {
                 // Fallback to average speed when bus speed is unavailable
                 const seconds = Math.ceil(((distMeters/1000) / avgSpeed) * 3600);
-                displayText = formatMinSec(seconds);
+                const smoothed = smoothStudentEta(seconds);
+                displayText = formatMinSec(smoothed);
                 // Show 'At Stop' to the side of ETA when speed is 0/unavailable
                 speedFrag = ' • At Stop';
                 speedTitle = '(approximate)';
             }
-
             const overlayHtml = speedTitle ? `<span title="${speedTitle}">${displayText}</span>${speedFrag}` : `${displayText}${speedFrag}`;
-            if (etaEl) etaEl.innerHTML = overlayHtml;
-            if (etaOverlay) etaOverlay.innerHTML = overlayHtml;
+            maybeUpdateStudentEta(overlayHtml);
         }
 
         function estimateRouteDistance(waypoints) { let total = 0; for (let i = 0; i < waypoints.length - 1; i++) { total += calcDistance(waypoints[i][0], waypoints[i][1], waypoints[i+1][0], waypoints[i+1][1]); } return total / 1000; }
