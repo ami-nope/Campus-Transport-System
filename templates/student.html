@@ -123,6 +123,8 @@
         @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52,211,153,0.4) } 70% { box-shadow: 0 0 0 6px rgba(52,211,153,0) } 100% { box-shadow: 0 0 0 0 rgba(52,211,153,0) } }
 
         .bus-icon { transition: transform 0.15s ease; }
+        @keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+        .eta-spinner { display:inline-block;width:10px;height:10px;border:1.5px solid rgba(52,211,153,0.3);border-top-color:#34d399;border-radius:50%;animation:spin 0.8s linear infinite;vertical-align:middle;margin-right:4px }
 
         @media (max-width: 968px) {
             .main-container { flex-direction:column; padding:12px }
@@ -190,6 +192,7 @@
             <div class="card">
                 <h3><span>🛣️</span> Routes</h3>
                 <div class="route-chips" id="routesContainer"></div>
+                <div id="routeBusList" style="margin-top:10px"></div>
             </div>
 
             <div class="card" id="routeDetailsCard" style="display:none">
@@ -245,6 +248,7 @@
         // Shared buses cache to avoid redundant /api/buses fetches
         let latestBuses = {};
         let sseConnected = false;
+        let _eventSource = null;
         let busesPollTimerId = null;
         const POLL_INTERVAL_MS = 2000;   // fast polling fallback when SSE is down
         const RESYNC_INTERVAL_MS = 30000; // light cleanup resync every 30s
@@ -272,6 +276,8 @@
         const AT_STOP_THRESHOLD = 80; // meters - consider bus "at stop" within this distance (accounts for GPS lag)
         const busNearestStopCache = {}; // busNum -> { idx, dist, atStopName }
         const busStatusCache = {}; // busNum -> last computed status string
+        const busSpeedCache = {};  // busNum -> last computed speed (km/h) or null
+        const busMovedCache = {};  // busNum -> distance moved (meters) since last update
 
         // Cached DOM element refs — populated once in initMap, avoids getElementById in hot paths
         const _dom = {};
@@ -288,6 +294,7 @@
             _dom.walkDistance = document.getElementById('walkDistance');
             _dom.routeDetailsCard = document.getElementById('routeDetailsCard');
             _dom.routesContainer = document.getElementById('routesContainer');
+            _dom.routeBusList = document.getElementById('routeBusList');
             _dom.totalTransportCount = document.getElementById('totalTransportCount');
         }
 
@@ -596,6 +603,21 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
             if (kmh > 120) return null;
             return Math.round(kmh);
         }
+        // Cache speed and movement BEFORE overwriting prevRawPositions — fixes race condition
+        function cacheSpeedAndMovement(busNum, newLat, newLng, lastUpdateIso) {
+            const pRaw = prevRawPositions[busNum];
+            const pTime = prevBusTimes[busNum];
+            const cTime = parseIsoTime(lastUpdateIso);
+            if (pRaw && pTime && cTime) {
+                const dt = (cTime - pTime) / 1000;
+                const dist = calcDistance(pRaw[0], pRaw[1], newLat, newLng);
+                busMovedCache[busNum] = dist;
+                if (dt >= 1.5) {
+                    const kmh = (dist / 1000) / (dt / 3600);
+                    busSpeedCache[busNum] = (kmh <= 120 && kmh > 0.1) ? Math.round(kmh) : (busSpeedCache[busNum] || null);
+                }
+            }
+        }
         // Combined stop/direction update — single waypoint iteration instead of 3 separate ones
         function updateBusStopInfo(busNum, rawPosition) {
             const routeId = busRouteMap[busNum];
@@ -628,11 +650,9 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
             if (!effectiveTime || (nowMs - effectiveTime) > OFFLINE_MS) { busStatusCache[busNum] = 'Offline'; return 'Offline'; }
             // Use cached at-stop result from updateBusStopInfo
             if (busCurrentStop[busNum]) { busStatusCache[busNum] = 'At Stop'; return 'At Stop'; }
-            const prevRaw = prevRawPositions[busNum];
-            if (prevRaw) {
-                const moved = calcDistance(prevRaw[0], prevRaw[1], rawPosition[0], rawPosition[1]);
-                if (moved < 5) { busStatusCache[busNum] = 'Idle'; return 'Idle'; }
-            }
+            // Use cached movement distance (computed BEFORE prevRawPositions was overwritten)
+            const moved = busMovedCache[busNum];
+            if (moved !== undefined && moved < 5) { busStatusCache[busNum] = 'Idle'; return 'Idle'; }
             busStatusCache[busNum] = 'Moving'; return 'Moving';
         }
         function getRouteById(id) { return routeMap[id] || allRoutes.find(r => r.id === id); }
@@ -673,7 +693,7 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
             };
         }
         function buildBusPopup(busNum, busData) {
-            const routeId = busRouteMap[busNum]; const route = getRouteById(routeId); const position = [busData.lat, busData.lng]; const status = determineStatus(busNum, position, busData.lastUpdate); const speed = computeSpeed(busNum, position, busData.lastUpdate); const routeName = route ? route.name : '—'; const last = busData.lastUpdate ? new Date(busData.lastUpdate).toLocaleTimeString() : '—';
+            const routeId = busRouteMap[busNum]; const route = getRouteById(routeId); const position = [busData.lat, busData.lng]; const status = determineStatus(busNum, position, busData.lastUpdate); const speed = busSpeedCache[busNum] || null; const routeName = route ? route.name : '—'; const last = busData.lastUpdate ? new Date(busData.lastUpdate).toLocaleTimeString() : '—';
             const statusColor = status==='Moving'?'#34d399':status==='At Stop'?'#5AC8FA':status==='Idle'?'#fbbf24':'#fb7185';
             const atStopName = busCurrentStop[busNum];
             const speedDisplay = (speed !== null && speed !== undefined) ? speed + ' km/h' : '—';
@@ -749,11 +769,93 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
             });
         }
 
+        function renderRouteBusByETA() {
+            const container = _dom.routeBusList || document.getElementById('routeBusList');
+            if (!container) return;
+            if (!selectedRouteId) { container.innerHTML = ''; return; }
+            const route = getRouteById(selectedRouteId);
+            if (!route || !route.waypoints || route.waypoints.length === 0) { container.innerHTML = ''; return; }
+            const refLocation = (userLocation && userLocation.length === 2) ? userLocation : (map ? [map.getCenter().lat, map.getCenter().lng] : null);
+            let nearestStop = route.waypoints[0], nearestStopIdx = 0;
+            if (refLocation) {
+                let minD = Infinity;
+                route.waypoints.forEach((wp, idx) => { const d = calcDistance(refLocation[0], refLocation[1], wp[0], wp[1]); if (d < minD) { minD = d; nearestStop = wp; nearestStopIdx = idx; } });
+            }
+            const nowMs = Date.now();
+            const busesOnRoute = [];
+            Object.entries(latestBuses).forEach(([busNum, b]) => {
+                if (!b || typeof b.lat !== 'number' || typeof b.lng !== 'number') return;
+                const rid = (b.routeId != null) ? b.routeId : busRouteMap[busNum];
+                if (String(rid) !== String(selectedRouteId)) return;
+                const t = b.lastUpdate ? parseIsoTime(b.lastUpdate) : null;
+                const lastSeen = busLastSeen[busNum] || 0;
+                const effectiveTime = Math.max(lastSeen, t || 0);
+                if (!effectiveTime || (nowMs - effectiveTime) > OFFLINE_MS) return;
+                const distM = calcDistance(b.lat, b.lng, nearestStop[0], nearestStop[1]);
+                const speedKmh = busSpeedCache[busNum] || null;
+                let etaSec, estimated = false;
+                if (distM <= AT_STOP_THRESHOLD) { etaSec = 0; }
+                else if (speedKmh && speedKmh > 0.1) { etaSec = Math.ceil(((distM / 1000) / speedKmh) * 3600); }
+                else { etaSec = Math.ceil(((distM / 1000) / 25) * 3600); estimated = true; }
+                busesOnRoute.push({ busNum, etaSec, distM, estimated, status: busStatusCache[busNum] || determineStatus(busNum, [b.lat, b.lng], b.lastUpdate) });
+            });
+            busesOnRoute.sort((a, b) => a.etaSec - b.etaSec);
+            if (busesOnRoute.length === 0) { container.innerHTML = '<div style="color:var(--text-sub);font-size:12px;padding:6px 0">No active transports on this route</div>'; return; }
+            const nearestStopName = (route.stops && route.stops[nearestStopIdx]) || ('Stop ' + (nearestStopIdx + 1));
+            const frag = document.createDocumentFragment();
+            const header = document.createElement('div');
+            header.style.cssText = 'font-size:11px;color:var(--text-sub);margin-bottom:6px;padding:2px 0';
+            header.textContent = 'ETA to ' + nearestStopName;
+            frag.appendChild(header);
+            busesOnRoute.forEach(bus => {
+                const color = colors[(parseInt(bus.busNum) - 1) % colors.length];
+                const etaDisplay = bus.etaSec === 0 ? 'At Stop' : formatHHMM(bus.etaSec);
+                const statusColor = bus.status==='Moving'?'#34d399':bus.status==='At Stop'?'#5AC8FA':bus.status==='Idle'?'#fbbf24':'#fb7185';
+                const isTracked = trackedBus && trackedBus === bus.busNum;
+                const item = document.createElement('div');
+                item.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:6px 10px;margin-bottom:4px;font-size:12px;cursor:pointer;border-radius:8px;border:1px solid var(--chip-border);background:var(--chip-gradient);box-shadow:var(--chip-shadow);transition:all 0.25s ease';
+                if (isTracked) {
+                    item.style.boxShadow = '0 0 0 2px ' + color + '55';
+                    item.style.background = 'rgba(255,255,255,0.08)';
+                    item.style.borderColor = color;
+                }
+                item.addEventListener('click', () => { setTrackedBus(bus.busNum); const bd = latestBuses[bus.busNum]; if (bd) map.setView([bd.lat, bd.lng], 17); });
+                const left = document.createElement('div');
+                left.style.cssText = 'display:flex;align-items:center;gap:8px';
+                const dot = document.createElement('div');
+                dot.style.cssText = 'width:20px;height:20px;border-radius:50%;background:' + color + ';display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:600';
+                dot.textContent = bus.busNum;
+                const name = document.createElement('span');
+                name.style.cssText = 'color:var(--text)';
+                name.textContent = isTracked ? '\u2713 Transport ' + bus.busNum : 'Transport ' + bus.busNum;
+                left.appendChild(dot); left.appendChild(name);
+                const right = document.createElement('div');
+                right.style.cssText = 'text-align:right';
+                const etaEl = document.createElement('div');
+                etaEl.style.cssText = 'color:#34d399;font-weight:600;font-size:12px';
+                if (bus.estimated) {
+                    etaEl.innerHTML = '<span class="eta-spinner"></span>~' + etaDisplay;
+                } else {
+                    etaEl.textContent = etaDisplay;
+                }
+                const statusEl = document.createElement('div');
+                statusEl.style.cssText = 'color:' + statusColor + ';font-size:10px';
+                statusEl.textContent = bus.status;
+                right.appendChild(etaEl); right.appendChild(statusEl);
+                item.appendChild(left); item.appendChild(right);
+                frag.appendChild(item);
+            });
+            container.textContent = '';
+            container.appendChild(frag);
+        }
+
         function selectRoute(routeId) {
             const newId = String(routeId);
             selectedRouteId = (selectedRouteId === newId) ? null : newId;
             Object.entries(routePolylines).forEach(([id, polyline]) => { if (!id.includes('-stop-')) { try { const opacity = selectedRouteId === String(id) ? 1 : 0.3; polyline.setStyle({ opacity }); } catch(e) {} } });
             renderRoutesList(allRoutes);
+            initSSE(selectedRouteId);
+            renderRouteBusByETA();
             if (selectedRouteId) {
                 const routeObj = getRouteById(routeId);
                 if (routeObj) { showRouteDetails(routeObj); if(_dom.currentRouteOverlay) _dom.currentRouteOverlay.textContent = routeObj.name; computeAndShowStudentETA(); }
@@ -795,7 +897,8 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
             let nearestStop = null; let minDist = Infinity; const refLocation = (userLocation && userLocation.length === 2) ? userLocation : (map ? [map.getCenter().lat, map.getCenter().lng] : null);
             if (refLocation && route.waypoints.length > 0) { route.waypoints.forEach((stop) => { const dist = calcDistance(refLocation[0], refLocation[1], stop[0], stop[1]); if (dist < minDist) { minDist = dist; nearestStop = stop; } }); if (nearestStop) { if (userLocation) { const distKm = (minDist / 1000).toFixed(2); const walkMin = Math.ceil(minDist / 1.4); if(_dom.walkDistance) _dom.walkDistance.textContent = `${distKm} km (${walkMin}m)`; if (walkingLine) map.removeLayer(walkingLine); walkingLine = L.polyline([userLocation, nearestStop], { color: '#999999', weight: 2, opacity: 0.6, dashArray: '5, 5' }).addTo(map); } else { if(_dom.walkDistance) _dom.walkDistance.textContent = '--'; } } } else { if(_dom.walkDistance) _dom.walkDistance.textContent = '--'; }
             // ETA computed separately to simplify: distance / speed
-            if(_dom.etaValue) _dom.etaValue.textContent = '--'; if(_dom.etaOverlay) _dom.etaOverlay.textContent = '--';
+            if(_dom.etaValue) _dom.etaValue.innerHTML = '<span class="eta-spinner"></span>Updating'; if(_dom.etaOverlay) _dom.etaOverlay.innerHTML = '<span class="eta-spinner"></span>';
+            studentEtaLastHtml = null; studentEtaLastTs = 0;
             computeAndShowStudentETA();
         }
         function formatMinSec(totalSeconds){
@@ -826,7 +929,7 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
 
             if(routeId){ activeRoute = getRouteById(routeId); }
             if(!activeRoute && selectedRouteId){ activeRoute = getRouteById(selectedRouteId); }
-            if(!activeRoute || !activeRoute.waypoints || activeRoute.waypoints.length===0){ return; }
+            if(!activeRoute || !activeRoute.waypoints || activeRoute.waypoints.length===0){ maybeUpdateStudentEta('--'); return; }
 
             // Find nearest student stop
             if(refLocation){ let minD=Infinity; activeRoute.waypoints.forEach(stop=>{ const d = calcDistance(refLocation[0],refLocation[1], stop[0], stop[1]); if(d<minD){ minD=d; nearestStop=stop; } }); }
@@ -835,27 +938,29 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
             // Choose bus: if not tracked, pick bus on route nearest to that stop
             if(!chosenBusNum){
                 const busesOnRoute = Object.entries(freshData).filter(([num,b])=>{ const rid = (b && b.routeId!=null) ? b.routeId : busRouteMap[num]; return rid === activeRoute.id; });
-                if(busesOnRoute.length===0){ return; }
+                if(busesOnRoute.length===0){ maybeUpdateStudentEta('<span class="eta-spinner"></span>Updating'); return; }
                 let bestNum=null, bestB=null, bestDist=Infinity;
                 for(const [num,b] of busesOnRoute){ if(!b || typeof b.lat!=='number' || typeof b.lng!=='number') continue; const d = calcDistance(b.lat,b.lng, nearestStop[0], nearestStop[1]); if(d<bestDist){ bestDist=d; bestNum=num; bestB=b; } }
                 chosenBusNum = bestNum; chosenBus = bestB;
-                if(!chosenBus){ return; }
+                if(!chosenBus){ maybeUpdateStudentEta('<span class="eta-spinner"></span>Updating'); return; }
             }
 
-            // Compute speed and ETA with min-change smoothing and HH:MM display
-            const speedKmh = computeSpeed(chosenBusNum, [chosenBus.lat, chosenBus.lng], chosenBus.lastUpdate);
+            // Use cached speed (computed before prevRawPositions overwrite)
+            const speedKmh = busSpeedCache[chosenBusNum] || null;
             const distMeters = calcDistance(chosenBus.lat, chosenBus.lng, nearestStop[0], nearestStop[1]);
             const avgSpeed = 25; // km/h
 
             if (distMeters <= AT_STOP_THRESHOLD) { maybeUpdateStudentEta('At Stop'); return; }
 
-            let seconds;
+            let seconds, estimated = false;
             if (speedKmh && speedKmh > 0.1) { seconds = Math.ceil(((distMeters/1000) / speedKmh) * 3600); }
-            else { seconds = Math.ceil(((distMeters/1000) / avgSpeed) * 3600); }
+            else { seconds = Math.ceil(((distMeters/1000) / avgSpeed) * 3600); estimated = true; }
 
             const smoothed = smoothStudentEta(seconds);
             const rounded = Math.round(smoothed/60)*60; // minute resolution
-            maybeUpdateStudentEta(formatHHMM(rounded));
+            const etaStr = formatHHMM(rounded);
+            if (estimated) { maybeUpdateStudentEta('<span class="eta-spinner"></span>~' + etaStr); }
+            else { maybeUpdateStudentEta(etaStr); }
         }
 
         function estimateRouteDistance(waypoints) { let total = 0; for (let i = 0; i < waypoints.length - 1; i++) { total += calcDistance(waypoints[i][0], waypoints[i][1], waypoints[i+1][0], waypoints[i+1][1]); } return total / 1000; }
@@ -863,8 +968,9 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
         function setTrackedBus(busNum) {
             trackedBus = busNum || null;
             Object.keys(busMarkers).forEach(num => { const marker = busMarkers[num]; const isTracked = trackedBus && num === trackedBus; const rawPos = prevRawPositions[num]; const busData = latestBuses[num]; const status = (rawPos && busData) ? determineStatus(num, rawPos, busData.lastUpdate) : 'Offline'; const isOffline = status === 'Offline'; try { marker.setOpacity(isOffline ? 0.3 : (isTracked ? 1 : 0.7)); } catch(e) {} const color = colors[(parseInt(num) - 1) % colors.length]; const rid = busRouteMap[num]; const onSelectedRoute = selectedRouteId && String(rid) === String(selectedRouteId); const newIcon = createIcon(num, color, currentIconSize, prevBusRotation[num] || 0, isTracked || onSelectedRoute); marker.setIcon(newIcon); prevTrackedState[num] = !!isTracked; prevRouteSelState[num] = !!onSelectedRoute; });
-            const rid = busRouteMap[busNum]; if (rid) { selectRoute(rid); const routeObj = getRouteById(rid); if(routeObj) showRouteDetails(routeObj); }
+            const rid = busRouteMap[busNum]; if (rid) { if (String(rid) !== String(selectedRouteId)) { selectRoute(rid); } const routeObj = getRouteById(rid); if(routeObj) showRouteDetails(routeObj); }
             computeAndShowStudentETA();
+            renderRouteBusByETA();
         }
 
         async function loadMetrics(){
@@ -969,10 +1075,11 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
                 // Mark local receive time for all buses in this response
                 visibleBusNumbers.forEach(n => { busLastSeen[n] = nowMs; });
                 const freshBusNumbers = visibleBusNumbers;
+                const freshBusSet = new Set(freshBusNumbers);
                 let activeCount = 0;
                 // Remove markers for buses missing or fully stale (beyond REMOVE_MS)
                 const existingBuses = Object.keys(busMarkers);
-                existingBuses.forEach(busNum => { if (!freshBusNumbers.includes(busNum)) { map.removeLayer(busMarkers[busNum]); delete busMarkers[busNum]; delete prevRawPositions[busNum]; delete prevBusPositions[busNum]; delete prevBusTimes[busNum]; delete busLastSeen[busNum]; delete busLastSSEUpdate[busNum]; delete busDirection[busNum]; delete busLastStopIdx[busNum]; delete busCurrentStop[busNum]; } });
+                existingBuses.forEach(busNum => { if (!freshBusSet.has(busNum)) { map.removeLayer(busMarkers[busNum]); delete busMarkers[busNum]; delete prevRawPositions[busNum]; delete prevBusPositions[busNum]; delete prevBusTimes[busNum]; delete busLastSeen[busNum]; delete busLastSSEUpdate[busNum]; delete busDirection[busNum]; delete busLastStopIdx[busNum]; delete busCurrentStop[busNum]; delete busSpeedCache[busNum]; delete busMovedCache[busNum]; } });
                 freshBusNumbers.forEach(busNum => {
                     const bus = buses[busNum]; const rawPos = [bus.lat, bus.lng]; const color = colors[(parseInt(busNum) - 1) % colors.length];
                     // If SSE already updated this bus recently, skip poll processing to avoid teleporting
@@ -992,6 +1099,8 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
                     busSnapInfo[busNum] = { segIdx: snapResult.segIdx };
                     const isTracked = trackedBus && busNum === trackedBus;
                     updateBusStopInfo(busNum, rawPos);
+                    // Cache speed/movement BEFORE overwriting prev positions
+                    cacheSpeedAndMovement(busNum, rawPos[0], rawPos[1], bus.lastUpdate);
                     const status = determineStatus(busNum, rawPos, bus.lastUpdate);
                     const isOffline = status === 'Offline';
                     if (!isOffline) activeCount++;
@@ -1033,6 +1142,7 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
                 if (_dom.activeCountOverlay) _dom.activeCountOverlay.textContent = activeCount;
                 updateActiveBusList(freshBusNumbers, buses);
                 computeAndShowStudentETA(latestBuses);
+                renderRouteBusByETA();
                 const now = getTimeString(); if (_dom.lastUpdate) _dom.lastUpdate.textContent = now; if (_dom.lastUpdateOverlay) _dom.lastUpdateOverlay.textContent = now;
             }).catch(error => console.error('Error:', error));
         }
@@ -1080,9 +1190,12 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
         }
 
         // Live updates via SSE for smooth animation
-        function initSSE(){
+        function initSSE(routeId){
+            if (_eventSource) { try { _eventSource.close(); } catch(e) {} _eventSource = null; sseConnected = false; }
+            const sseUrl = routeId ? '/events?routeId=' + encodeURIComponent(routeId) : '/events';
             try{
-                const es = new EventSource('/events');
+                const es = new EventSource(sseUrl);
+                _eventSource = es;
                 es.onopen = ()=>{
                     sseConnected = true;
                     if(busesPollTimerId){ try{ clearInterval(busesPollTimerId); }catch(e){} busesPollTimerId=null; }
@@ -1102,6 +1215,8 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
                             busLastSeen[busNum] = Date.now();
                             busLastSSEUpdate[busNum] = Date.now();
                             updateBusStopInfo(busNum, [b.lat, b.lng]);
+                            // Cache speed/movement BEFORE overwriting prev positions
+                            cacheSpeedAndMovement(busNum, b.lat, b.lng, b.lastUpdate);
                             prevRawPositions[busNum] = [b.lat, b.lng];
                             if(b.lastUpdate) prevBusTimes[busNum] = parseIsoTime(b.lastUpdate);
                             // update cache and animate
@@ -1131,7 +1246,7 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
                             if (_dom.lastUpdate) _dom.lastUpdate.textContent = now;
                             if (_dom.lastUpdateOverlay) _dom.lastUpdateOverlay.textContent = now;
                             // Throttle ETA recomputation from SSE — at most once per second
-                            if (!window._etaThrottle) { window._etaThrottle = setTimeout(() => { window._etaThrottle = null; computeAndShowStudentETA(latestBuses); }, 1000); }
+                            if (!window._etaThrottle) { window._etaThrottle = setTimeout(() => { window._etaThrottle = null; computeAndShowStudentETA(latestBuses); renderRouteBusByETA(); }, 1000); }
                         } else if(msg.type === 'bus_stop'){
                             const busNum = String(msg.bus);
                             delete latestBuses[busNum];
@@ -1143,6 +1258,8 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
                             delete busDirection[busNum];
                             delete busLastStopIdx[busNum];
                             delete busCurrentStop[busNum];
+                            delete busSpeedCache[busNum];
+                            delete busMovedCache[busNum];
                             const m = busMarkers[busNum]; if(m){ try{ map.removeLayer(m); }catch(e){} delete busMarkers[busNum]; }
                         } else if(msg.type === 'route_set'){
                             const busNum = String(msg.bus);

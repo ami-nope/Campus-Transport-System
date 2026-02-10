@@ -108,29 +108,59 @@ def _sync_worker():
 
 # ---------- SSE ----------
 _subscribers_lock = threading.Lock()
-_subscribers = []
+_subscribers = {}   # routeId|"all" -> [queue, ...]
 
 def broadcast(payload):
     try:
         data = json.dumps(payload)
     except Exception:
         data = json.dumps({"error": "bad-payload"})
+    # Extract routeId for targeted delivery
+    route_id = None
+    if isinstance(payload, dict):
+        route_id = payload.get('routeId')
+        if not route_id:
+            bus_data = payload.get('data')
+            if isinstance(bus_data, dict):
+                route_id = bus_data.get('routeId')
     with _subscribers_lock:
-        for q in list(_subscribers):
-            try:
-                q.put_nowait(data)
-            except Exception:
-                pass
+        if route_id:
+            # Targeted: send to "all" subscribers + matching route subscribers
+            sent = set()
+            for q in list(_subscribers.get('all', [])):
+                sent.add(id(q))
+                try:
+                    q.put_nowait(data)
+                except Exception:
+                    pass
+            for q in list(_subscribers.get(route_id, [])):
+                if id(q) not in sent:
+                    try:
+                        q.put_nowait(data)
+                    except Exception:
+                        pass
+        else:
+            # No route context (buses_clear, etc.) — send to all subscribers
+            sent = set()
+            for group in _subscribers.values():
+                for q in list(group):
+                    if id(q) not in sent:
+                        sent.add(id(q))
+                        try:
+                            q.put_nowait(data)
+                        except Exception:
+                            pass
 
 @app.route('/events')
 def sse_events():
     if os.environ.get('DISABLE_SSE', '').lower() in ('1', 'true', 'yes'):
         return Response('SSE disabled', status=503, mimetype='text/plain')
+    route_id = request.args.get('routeId') or 'all'
     def stream():
         q = queue.Queue(maxsize=100)
         hb = max(5, int(os.environ.get('SSE_HEARTBEAT_SEC', '20')))
         with _subscribers_lock:
-            _subscribers.append(q)
+            _subscribers.setdefault(route_id, []).append(q)
         yield 'event: ping\ndata: "connected"\n\n'
         try:
             while True:
@@ -142,8 +172,12 @@ def sse_events():
         finally:
             with _subscribers_lock:
                 try:
-                    _subscribers.remove(q)
-                except ValueError:
+                    subs = _subscribers.get(route_id)
+                    if subs:
+                        subs.remove(q)
+                        if not subs:
+                            del _subscribers[route_id]
+                except (ValueError, KeyError):
                     pass
     return Response(stream_with_context(stream()), mimetype='text/event-stream',
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no', 'Connection': 'keep-alive'})
@@ -390,9 +424,10 @@ def update_bus_location(bus_number):
 def stop_bus(bus_number):
     bus_id = str(bus_number)
     with _buses_lock:
-        _buses.pop(bus_id, None)
+        removed = _buses.pop(bus_id, None)
+    route_id = removed.get('routeId') if removed else None
     try:
-        broadcast({'type': 'bus_stop', 'bus': bus_id})
+        broadcast({'type': 'bus_stop', 'bus': bus_id, 'routeId': route_id})
     except Exception:
         pass
     return jsonify({'status': 'success'})
@@ -521,7 +556,7 @@ def status():
     return jsonify({
         'uptime_sec': int(time.time() - APP_START_TS),
         'requests_total': REQUESTS_TOTAL,
-        'sse_clients': len(_subscribers),
+        'sse_clients': sum(len(v) for v in _subscribers.values()),
         'buses_count': len(_buses),
         'routes_count': len(locs.get('routes', [])),
         'on_render': ON_RENDER,
