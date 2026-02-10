@@ -1,13 +1,96 @@
+# gevent monkey-patching must be first — makes threading/queue/time cooperative
+try:
+    from gevent import monkey
+    monkey.patch_all()
+except ImportError:
+    pass  # Allow running without gevent (localhost dev)
+
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, Response, stream_with_context
 from flask_cors import CORS
 import json
 import os
+import math
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 from datetime import datetime, timezone
 import threading
 import queue
 import time
+
+# ---------- 1-D Kalman filter for GPS smoothing ----------
+class GPSKalman:
+    """Lightweight 1-D Kalman per axis. ~2 multiplications per update."""
+    __slots__ = ('x', 'p', 'q', 'r')
+    def __init__(self, process_noise=0.00001, measurement_noise=0.00005):
+        self.x = None   # estimate
+        self.p = 1.0     # error covariance
+        self.q = process_noise
+        self.r = measurement_noise
+    def update(self, measurement):
+        if self.x is None:
+            self.x = measurement
+            return measurement
+        self.p += self.q
+        k = self.p / (self.p + self.r)
+        self.x += k * (measurement - self.x)
+        self.p *= (1 - k)
+        return self.x
+
+_kalman_filters = {}  # bus_id -> {'lat': GPSKalman, 'lng': GPSKalman}
+
+def kalman_smooth(bus_id, lat, lng):
+    if bus_id not in _kalman_filters:
+        _kalman_filters[bus_id] = {'lat': GPSKalman(), 'lng': GPSKalman()}
+    kf = _kalman_filters[bus_id]
+    return kf['lat'].update(lat), kf['lng'].update(lng)
+
+# ---------- server-side stop detection ----------
+def _haversine_m(lat1, lng1, lat2, lng2):
+    """Fast equirectangular distance in meters — accurate at campus scale."""
+    d2r = math.pi / 180
+    dlat = (lat2 - lat1) * d2r
+    dlng = (lng2 - lng1) * d2r
+    x = dlng * math.cos((lat1 + lat2) * 0.5 * d2r)
+    return 6371000 * math.sqrt(dlat * dlat + x * x)
+
+_AT_STOP_M = 80  # meters — "at stop" threshold
+_bus_stop_state = {}  # bus_id -> { 'atStop': str|None, 'nearestStopIdx': int, 'direction': 'up'|'down'|None }
+
+def detect_stop_info(bus_id, lat, lng, route_id):
+    """Detect nearest stop, at-stop, direction. Returns dict to merge into broadcast."""
+    result = {'atStop': None, 'nearestStopIdx': None, 'nearestStopName': None, 'direction': None}
+    if not route_id:
+        return result
+    locs = load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+    route = None
+    for r in locs.get('routes', []):
+        if str(r.get('id')) == str(route_id):
+            route = r
+            break
+    if not route or not route.get('waypoints') or len(route['waypoints']) < 2:
+        return result
+    wps = route['waypoints']
+    stops = route.get('stops', [])
+    best_idx, best_d = 0, float('inf')
+    for i, wp in enumerate(wps):
+        d = _haversine_m(lat, lng, wp[0], wp[1])
+        if d < best_d:
+            best_d = d
+            best_idx = i
+    result['nearestStopIdx'] = best_idx
+    stop_name = stops[best_idx] if best_idx < len(stops) and stops[best_idx] else f'Stop {best_idx + 1}'
+    result['nearestStopName'] = stop_name
+    if best_d <= _AT_STOP_M:
+        result['atStop'] = stop_name
+    # Direction
+    prev = _bus_stop_state.get(bus_id, {})
+    prev_idx = prev.get('nearestStopIdx')
+    direction = prev.get('direction')
+    if prev_idx is not None and prev_idx != best_idx:
+        direction = 'down' if best_idx > prev_idx else 'up'
+    result['direction'] = direction
+    _bus_stop_state[bus_id] = {'nearestStopIdx': best_idx, 'direction': direction, 'atStop': result['atStop']}
+    return result
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -180,7 +263,13 @@ def sse_events():
                 except (ValueError, KeyError):
                     pass
     return Response(stream_with_context(stream()), mimetype='text/event-stream',
-                    headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no', 'Connection': 'keep-alive'})
+                    headers={
+                        'Cache-Control': 'no-cache, no-transform',
+                        'X-Accel-Buffering': 'no',
+                        'Connection': 'keep-alive',
+                        'Content-Type': 'text/event-stream; charset=utf-8',
+                        'Transfer-Encoding': 'chunked',
+                    })
 
 # ---------- credentials helpers ----------
 def load_credentials():
@@ -377,7 +466,17 @@ def update_metrics():
 # ---------- bus APIs ----------
 @app.route('/api/buses', methods=['GET'])
 def get_all_buses():
-    return jsonify(_buses)
+    # Enrich with latest stop state for polling fallback
+    with _buses_lock:
+        result = {}
+        for bus_id, data in _buses.items():
+            entry = dict(data)
+            ss = _bus_stop_state.get(bus_id, {})
+            entry['atStop'] = ss.get('atStop')
+            entry['nearestStopName'] = ss.get('nearestStopName') if 'nearestStopName' not in entry else entry['nearestStopName']
+            entry['direction'] = ss.get('direction')
+            result[bus_id] = entry
+    return jsonify(result)
 
 @app.route('/api/buses/clear', methods=['POST'])
 def clear_all_buses():
@@ -391,40 +490,49 @@ def clear_all_buses():
         pass
     return jsonify({'status': 'success'})
 
+_bus_last_broadcast = {}  # bus_id -> monotonic timestamp of last broadcast
+
 @app.route('/api/bus/<int:bus_number>', methods=['POST'])
 def update_bus_location(bus_number):
     raw = request.get_json(silent=True) or request.form.to_dict() or {}
     try:
-        lat = float(raw.get('lat'))
-        lng = float(raw.get('lng'))
+        raw_lat = float(raw.get('lat'))
+        raw_lng = float(raw.get('lng'))
     except (TypeError, ValueError):
         return jsonify({'error': 'Provide numeric lat and lng'}), 400
-    last_update = raw.get('lastUpdate') or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    # Kalman smoothing
     bus_id = str(bus_number)
+    lat, lng = kalman_smooth(bus_id, raw_lat, raw_lng)
+    last_update = raw.get('lastUpdate') or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+    heading = raw.get('heading')  # device heading from driver/simulator
     should_broadcast = True
+    now_mono = time.monotonic()
     with _buses_lock:
         existing = _buses.get(bus_id, {})
         route_id = raw.get('routeId', existing.get('routeId'))
-        # Skip broadcast if position hasn't meaningfully changed (~0.5m threshold)
-        # BUT still broadcast every 5s even when stationary so clients can update status
+        # Skip broadcast if position hasn't meaningfully changed (~0.5m)
+        # Always broadcast at least every 3s even when stationary (heartbeat)
         if existing and 'lat' in existing and 'lng' in existing:
             dlat = abs(lat - existing['lat'])
             dlng = abs(lng - existing['lng'])
             if dlat < 0.000005 and dlng < 0.000005:
-                prev_update = existing.get('lastUpdate', '')
-                prev_time = 0
-                try:
-                    from datetime import datetime
-                    prev_time = datetime.strptime(prev_update, '%Y-%m-%dT%H:%M:%SZ').timestamp() if prev_update else 0
-                except Exception:
-                    pass
-                # Broadcast stationary heartbeat every 5s
-                if time.time() - prev_time < 5:
+                last_bc = _bus_last_broadcast.get(bus_id, 0)
+                if (now_mono - last_bc) < 3:
                     should_broadcast = False
-        _buses[bus_id] = {'lat': lat, 'lng': lng, 'lastUpdate': last_update, 'routeId': route_id}
-        current_data = _buses[bus_id]
+        entry = {'lat': lat, 'lng': lng, 'lastUpdate': last_update, 'routeId': route_id}
+        if heading is not None:
+            try:
+                entry['heading'] = float(heading)
+            except (TypeError, ValueError):
+                pass
+        _buses[bus_id] = entry
+        current_data = dict(entry)
+    # Server-side stop detection — enrich broadcast payload
+    stop_info = detect_stop_info(bus_id, lat, lng, route_id)
+    current_data.update(stop_info)
     try:
         if should_broadcast:
+            _bus_last_broadcast[bus_id] = now_mono
             broadcast({'type': 'bus_update', 'bus': bus_id, 'data': current_data})
     except Exception:
         pass
@@ -436,6 +544,10 @@ def stop_bus(bus_number):
     with _buses_lock:
         removed = _buses.pop(bus_id, None)
     route_id = removed.get('routeId') if removed else None
+    # Clean up Kalman + stop state
+    _kalman_filters.pop(bus_id, None)
+    _bus_stop_state.pop(bus_id, None)
+    _bus_last_broadcast.pop(bus_id, None)
     try:
         broadcast({'type': 'bus_stop', 'bus': bus_id, 'routeId': route_id})
     except Exception:
