@@ -211,6 +211,9 @@ async function showRouteOnMap(routeId) {
   routePolyline = L.polyline(coords, {
     color: route.color || '#667eea', weight: 4, opacity: 0.7, dashArray: '8,6'
   }).addTo(map);
+  // Bring trail and marker above the route line
+  trail.bringToFront();
+  marker.bringToFront();
 
   route.waypoints.forEach((wp, idx) => {
     const name = (route.stops && route.stops[idx]) || `Stop ${idx+1}`;

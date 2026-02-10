@@ -16,8 +16,8 @@
             --text: #e6eef8;
             --text-sub: #9aa4b2;
             --text-heading: #dbeafe;
-            --card-bg: rgba(18, 24, 38, 0.55);
-            --card-border: rgba(255,255,255,0.06);
+            --card-bg: rgba(22, 20, 42, 0.55);
+            --card-border: rgba(130,100,255,0.10);
             --card-shadow: rgba(0,0,0,0.45);
             --stat-bg: rgba(255,255,255,0.06);
             --stat-border: rgba(255,255,255,0.18);
@@ -39,7 +39,7 @@
             --text-sub: #555e6e;
             --text-heading: #1e293b;
             --card-bg: rgba(255, 255, 255, 0.85);
-            --card-border: rgba(0,0,0,0.08);
+            --card-border: rgba(100,80,200,0.10);
             --card-shadow: rgba(0,0,0,0.10);
             --stat-bg: rgba(0,0,0,0.03);
             --stat-border: rgba(0,0,0,0.10);
@@ -68,7 +68,7 @@
         .sidebar { flex:1; min-width:260px; max-width:360px; }
         .map-container { flex:1.5; min-height:0; position: relative; }
 
-        #map { height: 500px; border-radius: 16px; border: 2px solid var(--map-border); box-shadow: 0 8px 28px var(--card-shadow); background: var(--map-bg); }
+        #map { height: 500px; border-radius: 16px; border: 2px solid rgba(255,255,255,0.18); box-shadow: 0 0 0 1px rgba(130,100,255,0.12), 0 8px 28px var(--card-shadow); background: var(--map-bg); }
 
         .card { background: var(--card-bg); border-radius: 16px; padding: 12px; margin-bottom: 12px; border: 1px solid var(--card-border); backdrop-filter: blur(18px) saturate(140%); box-shadow: 0 8px 28px var(--card-shadow); transition: all 0.25s ease; }
         .card h3 { color: var(--text-heading); font-size:15px; margin-bottom:10px }
@@ -199,7 +199,7 @@
                 <h3><span>📍</span> Route Details</h3>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px">
                     <div style="text-align:center"><div style="font-size:12px; color:#9aa4b2">ETA</div><div id="etaValue" style="font-size:18px; font-weight:600; color:#34d399; margin-top:4px">--</div></div>
-                    <div style="text-align:center"><div style="font-size:12px; color:#9aa4b2">Walk Distance</div><div id="walkDistance" style="font-size:18px; font-weight:600; color:#667eea; margin-top:4px">--</div></div>
+                    <div style="text-align:center"><div style="font-size:12px; color:#9aa4b2">Nearest Stop</div><div id="walkDistance" style="font-size:18px; font-weight:600; color:#667eea; margin-top:4px">--</div></div>
                 </div>
                 <div id="busesOnRoute" style="margin-top:12px; font-size:12px; color:#9aa4b2">🚌 Transports on route: <span id="busesOnRouteCount">-</span></div>
             </div>
@@ -785,8 +785,8 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
             const busesOnRoute = [];
             Object.entries(latestBuses).forEach(([busNum, b]) => {
                 if (!b || typeof b.lat !== 'number' || typeof b.lng !== 'number') return;
-                const rid = (b.routeId != null) ? b.routeId : busRouteMap[busNum];
-                if (String(rid) !== String(selectedRouteId)) return;
+                const rid = (b.routeId != null) ? String(b.routeId) : (busRouteMap[busNum] != null ? String(busRouteMap[busNum]) : null);
+                if (rid !== String(selectedRouteId)) return;
                 const t = b.lastUpdate ? parseIsoTime(b.lastUpdate) : null;
                 const lastSeen = busLastSeen[busNum] || 0;
                 const effectiveTime = Math.max(lastSeen, t || 0);
@@ -808,7 +808,8 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
             header.textContent = 'ETA to ' + nearestStopName;
             frag.appendChild(header);
             busesOnRoute.forEach(bus => {
-                const color = colors[(parseInt(bus.busNum) - 1) % colors.length];
+                const colorIdx = (parseInt(bus.busNum) || 0);
+                const color = colors[(colorIdx > 0 ? colorIdx - 1 : 0) % colors.length];
                 const etaDisplay = bus.etaSec === 0 ? 'At Stop' : formatHHMM(bus.etaSec);
                 const statusColor = bus.status==='Moving'?'#34d399':bus.status==='At Stop'?'#5AC8FA':bus.status==='Idle'?'#fbbf24':'#fb7185';
                 const isTracked = trackedBus && trackedBus === bus.busNum;
@@ -890,7 +891,7 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
             const busesOnRoute = Object.entries(busesData)
                 .filter(([busNum, b]) => {
                     const rid = (b && b.routeId != null) ? b.routeId : busRouteMap[busNum];
-                    return rid === route.id;
+                    return String(rid) === String(route.id);
                 })
                 .map(([busNum]) => busNum);
             if (_dom.busesOnRouteCount) _dom.busesOnRouteCount.textContent = busesOnRoute.length;
@@ -911,7 +912,7 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
         let studentEtaSmooth = null; let studentEtaLastTs = 0; const STUD_ETA_ALPHA = 0.35; const STUD_ETA_UPDATE_MS = 2500; const STUD_ETA_MIN_STEP = 3; let studentEtaLastHtml = null;
         function smoothStudentEta(secs){ if(!isFinite(secs)) return secs; if(studentEtaSmooth==null){ studentEtaSmooth = secs; return secs; } const sm = STUD_ETA_ALPHA*secs + (1-STUD_ETA_ALPHA)*studentEtaSmooth; if(Math.abs(sm-studentEtaSmooth) < STUD_ETA_MIN_STEP){ studentEtaSmooth = studentEtaSmooth + Math.sign(sm-studentEtaSmooth) * STUD_ETA_MIN_STEP; } else { studentEtaSmooth = sm; } return Math.max(0, Math.round(studentEtaSmooth)); }
         function formatHHMM(totalSeconds){ const mins = Math.max(0, Math.round(totalSeconds/60)); const h = Math.floor(mins/60); const m = mins % 60; return h>0 ? `${h}:${String(m).padStart(2,'0')}` : `${m}m`; }
-        function maybeUpdateStudentEta(html){ const now = Date.now(); if(now - studentEtaLastTs >= STUD_ETA_UPDATE_MS && html !== studentEtaLastHtml){ if(_dom.etaValue) _dom.etaValue.innerHTML = html; if(_dom.etaOverlay) _dom.etaOverlay.innerHTML = html; studentEtaLastHtml = html; studentEtaLastTs = now; } }
+        function maybeUpdateStudentEta(html){ const now = Date.now(); const isFirst = studentEtaLastHtml === null; if((isFirst || now - studentEtaLastTs >= STUD_ETA_UPDATE_MS) && html !== studentEtaLastHtml){ if(_dom.etaValue) _dom.etaValue.innerHTML = html; if(_dom.etaOverlay) _dom.etaOverlay.innerHTML = html; studentEtaLastHtml = html; studentEtaLastTs = now; } }
 
         async function computeAndShowStudentETA(busesDataParam){
             const busesData = busesDataParam || latestBuses || {};
@@ -937,7 +938,7 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
 
             // Choose bus: if not tracked, pick bus on route nearest to that stop
             if(!chosenBusNum){
-                const busesOnRoute = Object.entries(freshData).filter(([num,b])=>{ const rid = (b && b.routeId!=null) ? b.routeId : busRouteMap[num]; return rid === activeRoute.id; });
+                const busesOnRoute = Object.entries(freshData).filter(([num,b])=>{ const rid = (b && b.routeId!=null) ? b.routeId : busRouteMap[num]; return String(rid) === String(activeRoute.id); });
                 if(busesOnRoute.length===0){ maybeUpdateStudentEta('<span class="eta-spinner"></span>Updating'); return; }
                 let bestNum=null, bestB=null, bestDist=Infinity;
                 for(const [num,b] of busesOnRoute){ if(!b || typeof b.lat!=='number' || typeof b.lng!=='number') continue; const d = calcDistance(b.lat,b.lng, nearestStop[0], nearestStop[1]); if(d<bestDist){ bestDist=d; bestNum=num; bestB=b; } }
@@ -988,7 +989,7 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
         const DARK_LABELS = 'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png';
         const LIGHT_TILES = 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png';
         const LIGHT_LABELS = 'https://{s}.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}{r}.png';
-        const TILE_OPTS = { attribution: '&copy; CARTO', maxZoom: 19, updateWhenIdle: false, updateWhenZooming: false, keepBuffer: 6 };
+        const TILE_OPTS = { attribution: '&copy; CARTO', maxZoom: 19, updateWhenIdle: true, updateWhenZooming: false, keepBuffer: 4, detectRetina: false };
 
         function setMapTiles(dark) {
             mapIsDark = dark;
@@ -1050,10 +1051,18 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
             document.getElementById('hostelsToggle').addEventListener('change', (e) => { updateLayerVisibility('hostels', e.target.checked); });
             document.getElementById('classesToggle').addEventListener('change', (e) => { updateLayerVisibility('classes', e.target.checked); });
             document.getElementById('routesToggle').addEventListener('change', (e) => { updateLayerVisibility('routes', e.target.checked); });
-            // Pause polling when tab hidden; resume on show if SSE not connected
+            // Pause polling when tab hidden; resume and force resync on show
             document.addEventListener('visibilitychange', ()=>{
-                if(document.hidden){ if(busesPollTimerId){ try{ clearInterval(busesPollTimerId); }catch(e){} busesPollTimerId=null; }
-                } else { if(!sseConnected && !busesPollTimerId){ busesPollTimerId = setInterval(updateBuses, POLL_INTERVAL_MS); } }
+                if(document.hidden){
+                    if(busesPollTimerId){ try{ clearInterval(busesPollTimerId); }catch(e){} busesPollTimerId=null; }
+                } else {
+                    // Immediate resync on tab refocus
+                    updateBuses();
+                    // If SSE died while hidden, restart it
+                    if(_eventSource && _eventSource.readyState === 2){ initSSE(selectedRouteId); }
+                    // Always ensure polling is running as fallback
+                    if(!busesPollTimerId){ busesPollTimerId = setInterval(updateBuses, POLL_INTERVAL_MS); }
+                }
             });
         }
 
@@ -1190,19 +1199,33 @@ ${glow ? `<path d="${shape}" fill="none" stroke="${color}" stroke-width="6" opac
         }
 
         // Live updates via SSE for smooth animation
+        let _sseLastMsg = 0; // timestamp of last SSE message for health check
         function initSSE(routeId){
             if (_eventSource) { try { _eventSource.close(); } catch(e) {} _eventSource = null; sseConnected = false; }
             const sseUrl = routeId ? '/events?routeId=' + encodeURIComponent(routeId) : '/events';
             try{
                 const es = new EventSource(sseUrl);
                 _eventSource = es;
+                _sseLastMsg = Date.now();
                 es.onopen = ()=>{
                     sseConnected = true;
+                    _sseLastMsg = Date.now();
                     if(busesPollTimerId){ try{ clearInterval(busesPollTimerId); }catch(e){} busesPollTimerId=null; }
-                    // Light resync every RESYNC_INTERVAL_MS to prune stale buses
-                    if(!window.__resyncTimer){ window.__resyncTimer = setInterval(()=>{ if(!document.hidden) updateBuses(); }, RESYNC_INTERVAL_MS); }
+                    // Light resync every RESYNC_INTERVAL_MS to prune stale buses + SSE health check
+                    if(window.__resyncTimer){ clearInterval(window.__resyncTimer); }
+                    window.__resyncTimer = setInterval(()=>{
+                        if(!document.hidden) updateBuses();
+                        // SSE health: if no message in 45s (heartbeat should be 20s), reconnect
+                        if(sseConnected && (Date.now() - _sseLastMsg) > 45000){
+                            sseConnected = false;
+                            try { _eventSource.close(); } catch(e){}
+                            _eventSource = null;
+                            initSSE(selectedRouteId);
+                        }
+                    }, RESYNC_INTERVAL_MS);
                 };
                 es.onmessage = (ev)=>{
+                    _sseLastMsg = Date.now();
                     try{
                         const msg = JSON.parse(ev.data);
                         if(msg.type === 'bus_update'){

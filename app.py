@@ -406,11 +406,21 @@ def update_bus_location(bus_number):
         existing = _buses.get(bus_id, {})
         route_id = raw.get('routeId', existing.get('routeId'))
         # Skip broadcast if position hasn't meaningfully changed (~0.5m threshold)
+        # BUT still broadcast every 5s even when stationary so clients can update status
         if existing and 'lat' in existing and 'lng' in existing:
             dlat = abs(lat - existing['lat'])
             dlng = abs(lng - existing['lng'])
             if dlat < 0.000005 and dlng < 0.000005:
-                should_broadcast = False
+                prev_update = existing.get('lastUpdate', '')
+                prev_time = 0
+                try:
+                    from datetime import datetime
+                    prev_time = datetime.strptime(prev_update, '%Y-%m-%dT%H:%M:%SZ').timestamp() if prev_update else 0
+                except Exception:
+                    pass
+                # Broadcast stationary heartbeat every 5s
+                if time.time() - prev_time < 5:
+                    should_broadcast = False
         _buses[bus_id] = {'lat': lat, 'lng': lng, 'lastUpdate': last_update, 'routeId': route_id}
         current_data = _buses[bus_id]
     try:
