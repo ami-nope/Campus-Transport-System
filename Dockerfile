@@ -13,4 +13,4 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "gunicorn -w 1 -k gevent --timeout 120 --bind 0.0.0.0:${PORT:-8080} app:app"]
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "app:app"]
