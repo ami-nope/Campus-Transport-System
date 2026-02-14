@@ -3691,11 +3691,13 @@
         const ETA_TREND_MIN_INTERVAL_MS = 2000;
         const VIEWER_PRESENCE_KEY = 'kiit_student_viewers_presence_v1';
         const VIEWER_HEARTBEAT_MS = 5000;
+        const STUDENT_SERVER_PRESENCE_HEARTBEAT_MS = 12000;
         const VIEWER_STALE_MS = 16000;
         const VIEWER_ID = `viewer_${Math.random().toString(36).slice(2)}_${Date.now()}`;
         const WALK_SPEED_MPS = 1.35;
         const RIDE_SPEED_KMH = 18;
         let viewerPresenceTimerId = null;
+        let studentPresenceInFlight = false;
         let approxViewerCount = 1;
         let assistantFromEdited = false;
         let assistantDestinationPoint = null;
@@ -4940,15 +4942,37 @@
                 approxViewerCount = 1;
             }
         }
+        function sendStudentPresence(active = true, useKeepalive = false) {
+            if (studentPresenceInFlight && active) return;
+            const payload = JSON.stringify({ clientId: VIEWER_ID, active: !!active });
+            if (!active && navigator.sendBeacon) {
+                try {
+                    const blob = new Blob([payload], { type: 'application/json' });
+                    navigator.sendBeacon('/api/presence/student', blob);
+                    return;
+                } catch (e) {}
+            }
+            if (active) studentPresenceInFlight = true;
+            fetch('/api/presence/student', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: payload,
+                keepalive: !!useKeepalive
+            }).catch(() => {}).finally(() => {
+                if (active) studentPresenceInFlight = false;
+            });
+        }
         function startViewerPresenceTracking() {
             refreshViewerPresence(false);
+            sendStudentPresence(true);
             if (viewerPresenceTimerId) {
                 try { clearInterval(viewerPresenceTimerId); } catch (e) {}
                 viewerPresenceTimerId = null;
             }
             viewerPresenceTimerId = setInterval(() => {
                 refreshViewerPresence(false);
-            }, VIEWER_HEARTBEAT_MS);
+                sendStudentPresence(true);
+            }, Math.max(VIEWER_HEARTBEAT_MS, STUDENT_SERVER_PRESENCE_HEARTBEAT_MS));
         }
         function bindAssistantInteractions() {
             const fromInput = _dom.fromInput || document.getElementById('fromInput');
@@ -7067,6 +7091,7 @@
                     userWatchId = null;
                 }
                 refreshViewerPresence(true);
+                sendStudentPresence(false, true);
             });
             document.addEventListener('visibilitychange', ()=>{
                 if(document.hidden){
@@ -7078,6 +7103,7 @@
                     calibrateFramePacing();
                     refreshFramePacing();
                     refreshViewerPresence(false);
+                    sendStudentPresence(true);
                     // Immediate resync on tab refocus
                     updateBuses();
                     // If SSE died while hidden, restart it

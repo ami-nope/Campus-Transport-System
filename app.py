@@ -8,6 +8,7 @@ except ImportError:
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, Response, stream_with_context, has_request_context
 from flask_cors import CORS
 import json
+import copy
 import os
 import sys
 import math
@@ -72,12 +73,7 @@ def detect_stop_info(bus_id, lat, lng, route_id):
     }
     if not route_id:
         return result
-    locs = load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
-    route = None
-    for r in locs.get('routes', []):
-        if str(r.get('id')) == str(route_id):
-            route = r
-            break
+    route = get_route_from_locations(route_id)
     if not route or not route.get('waypoints') or len(route['waypoints']) < 2:
         return result
     wps = route['waypoints']
@@ -165,13 +161,54 @@ DEFAULT_ROUTE_SNAP_SETTINGS = {
     'distance_m': 10,
     'show_range': False,
 }
+DEFAULT_LOCATIONS_PAYLOAD = {"hostels": [], "classes": [], "routes": []}
+DEFAULT_CREDENTIALS_PAYLOAD = {"admins": [], "institute_name": "INSTITUTE"}
 ADMIN_ROLE_STANDARD = 'admin'
 ADMIN_ROLE_GOLD = 'gold'
 _app_disk_io_lock = threading.Lock()
 APP_DISK_READ_BYTES = 0
 APP_DISK_WRITE_BYTES = 0
+ROOT_TRACE_ENABLED = str(os.environ.get('ROOT_DEBUG_TRACE', '')).strip().lower() in ('1', 'true', 'yes')
+
+_locations_cache_lock = threading.Lock()
+_locations_cache_data = None
+_locations_cache_mtime = None
+_locations_cache_route_index = {}
+
+_credentials_cache_lock = threading.Lock()
+_credentials_cache_data = None
+_credentials_cache_mtime = None
+
+_metrics_lock = threading.Lock()
+_app_ready_lock = threading.Lock()
 
 # ---------- simple JSON helpers ----------
+def _get_file_mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except Exception:
+        return None
+
+def _normalize_locations_payload(raw):
+    data = raw if isinstance(raw, dict) else {}
+    hostels = data.get('hostels') if isinstance(data.get('hostels'), list) else []
+    classes = data.get('classes') if isinstance(data.get('classes'), list) else []
+    routes = data.get('routes') if isinstance(data.get('routes'), list) else []
+    return {'hostels': hostels, 'classes': classes, 'routes': routes}
+
+def _build_route_index(routes):
+    idx = {}
+    for route in routes if isinstance(routes, list) else []:
+        if not isinstance(route, dict):
+            continue
+        rid = route.get('id')
+        if rid is None:
+            continue
+        key = str(rid)
+        if key not in idx:
+            idx[key] = route
+    return idx
+
 def load_json(path, default):
     global APP_DISK_READ_BYTES
     try:
@@ -181,32 +218,97 @@ def load_json(path, default):
                 APP_DISK_READ_BYTES += max(0, int(size_est))
         except Exception:
             pass
-        with open(path, 'r') as f:
+        with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception:
         return default
 
-def save_json(path, data):
+def _save_json_with_status(path, data):
     global APP_DISK_WRITE_BYTES
     try:
         body = json.dumps(data, indent=2)
-        with open(path, 'w') as f:
+        with open(path, 'w', encoding='utf-8') as f:
             f.write(body)
         try:
             with _app_disk_io_lock:
                 APP_DISK_WRITE_BYTES += len(body.encode('utf-8'))
         except Exception:
             pass
+        return True
     except Exception:
-        pass
+        return False
+
+def save_json(path, data):
+    _save_json_with_status(path, data)
+
+def _get_locations_cached_snapshot():
+    global _locations_cache_data, _locations_cache_mtime, _locations_cache_route_index
+    current_mtime = _get_file_mtime(LOCATIONS_FILE)
+    with _locations_cache_lock:
+        if _locations_cache_data is not None and _locations_cache_mtime == current_mtime:
+            return _locations_cache_data, _locations_cache_route_index
+    loaded = _normalize_locations_payload(load_json(LOCATIONS_FILE, copy.deepcopy(DEFAULT_LOCATIONS_PAYLOAD)))
+    route_index = _build_route_index(loaded.get('routes', []))
+    with _locations_cache_lock:
+        _locations_cache_data = loaded
+        _locations_cache_mtime = _get_file_mtime(LOCATIONS_FILE)
+        _locations_cache_route_index = route_index
+        return _locations_cache_data, _locations_cache_route_index
+
+def get_locations_readonly():
+    data, _ = _get_locations_cached_snapshot()
+    return data
+
+def get_locations_for_update():
+    return copy.deepcopy(get_locations_readonly())
+
+def get_route_from_locations(route_id):
+    if route_id is None:
+        return None
+    _, route_index = _get_locations_cached_snapshot()
+    return route_index.get(str(route_id))
+
+def save_locations(data):
+    global _locations_cache_data, _locations_cache_mtime, _locations_cache_route_index
+    normalized = _normalize_locations_payload(data)
+    ok = _save_json_with_status(LOCATIONS_FILE, normalized)
+    if ok:
+        cache_payload = copy.deepcopy(normalized)
+        with _locations_cache_lock:
+            _locations_cache_data = cache_payload
+            _locations_cache_mtime = _get_file_mtime(LOCATIONS_FILE)
+            _locations_cache_route_index = _build_route_index(cache_payload.get('routes', []))
+    return ok
+
+def _get_credentials_cached_payload():
+    global _credentials_cache_data, _credentials_cache_mtime
+    current_mtime = _get_file_mtime(CREDENTIALS_FILE)
+    with _credentials_cache_lock:
+        if _credentials_cache_data is not None and _credentials_cache_mtime == current_mtime:
+            return copy.deepcopy(_credentials_cache_data)
+    loaded = load_json(CREDENTIALS_FILE, copy.deepcopy(DEFAULT_CREDENTIALS_PAYLOAD))
+    payload = loaded if isinstance(loaded, dict) else copy.deepcopy(DEFAULT_CREDENTIALS_PAYLOAD)
+    with _credentials_cache_lock:
+        _credentials_cache_data = copy.deepcopy(payload)
+        _credentials_cache_mtime = _get_file_mtime(CREDENTIALS_FILE)
+    return payload
+
+def _update_credentials_cache(payload):
+    global _credentials_cache_data, _credentials_cache_mtime
+    if not isinstance(payload, dict):
+        return
+    with _credentials_cache_lock:
+        _credentials_cache_data = copy.deepcopy(payload)
+        _credentials_cache_mtime = _get_file_mtime(CREDENTIALS_FILE)
 
 def ensure_files():
     if not os.path.exists(BUSES_FILE):
         save_json(BUSES_FILE, {})
     if not os.path.exists(LOCATIONS_FILE):
-        save_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+        save_locations(copy.deepcopy(DEFAULT_LOCATIONS_PAYLOAD))
     if not os.path.exists(CREDENTIALS_FILE):
-        save_json(CREDENTIALS_FILE, {"admins": [], "institute_name": "INSTITUTE"})
+        save_json(CREDENTIALS_FILE, copy.deepcopy(DEFAULT_CREDENTIALS_PAYLOAD))
+        _update_credentials_cache(copy.deepcopy(DEFAULT_CREDENTIALS_PAYLOAD))
     if not os.path.exists(AUDIT_FILE):
         save_json(AUDIT_FILE, [])
 
@@ -699,9 +801,10 @@ BANDWIDTH_OUT_BYTES = 0
 INACTIVE_REMOVE_SEC = 30
 DESTINATION_REMOVE_SEC = 5
 _bus_destination_ts = {}  # bus_id -> monotonic timestamp when destination reached
+_buses_dirty = False
 
 def _init_app():
-    global _buses, _worker_started, _audit_logs
+    global _buses, _worker_started, _audit_logs, _buses_dirty
     init_t0 = time.perf_counter()
     app.logger.info('_init_app start')
     step_t0 = time.perf_counter()
@@ -727,6 +830,7 @@ def _init_app():
         except Exception:
             pass  # drop invalid entries
     _buses = cleaned
+    _buses_dirty = False
     if cleaned != raw:
         save_json(BUSES_FILE, cleaned)
     if not _worker_started:
@@ -739,27 +843,31 @@ def _before():
     global REQUESTS_TOTAL, BANDWIDTH_IN_BYTES
     trace = None
     try:
-        if request.path in ('/', '/student'):
+        if ROOT_TRACE_ENABLED and request.path in ('/', '/student'):
             trace = uuid.uuid4().hex[:8]
             request.environ['root_trace_id'] = trace
             app.logger.info('[req:%s] before_request start path=%s', trace, request.path)
     except Exception:
         trace = None
     if not hasattr(app, '_ready'):
-        ready_t0 = time.perf_counter()
-        if trace:
-            app.logger.info('[req:%s] app not ready, running _init_app', trace)
-        _init_app()
-        app._ready = True
-        if trace:
-            app.logger.info('[req:%s] _init_app finished in %.1fms', trace, (time.perf_counter() - ready_t0) * 1000.0)
-    REQUESTS_TOTAL += 1
+        with _app_ready_lock:
+            if not hasattr(app, '_ready'):
+                ready_t0 = time.perf_counter()
+                if trace:
+                    app.logger.info('[req:%s] app not ready, running _init_app', trace)
+                _init_app()
+                app._ready = True
+                if trace:
+                    app.logger.info('[req:%s] _init_app finished in %.1fms', trace, (time.perf_counter() - ready_t0) * 1000.0)
+    with _metrics_lock:
+        REQUESTS_TOTAL += 1
     try:
         in_len = request.content_length
         if in_len is None:
             in_len = int(request.headers.get('Content-Length', '0') or 0)
         if in_len and in_len > 0:
-            BANDWIDTH_IN_BYTES += int(in_len)
+            with _metrics_lock:
+                BANDWIDTH_IN_BYTES += int(in_len)
     except Exception:
         pass
 
@@ -773,7 +881,8 @@ def _after(resp):
             body = resp.get_data(as_text=False)
             out_len = len(body) if body is not None else 0
         if out_len and out_len > 0:
-            BANDWIDTH_OUT_BYTES += int(out_len)
+            with _metrics_lock:
+                BANDWIDTH_OUT_BYTES += int(out_len)
     except Exception:
         pass
     try:
@@ -783,6 +892,7 @@ def _after(resp):
     return resp
 
 def _auto_cleanup_buses():
+    global _buses_dirty
     now_epoch = time.time()
     now_mono = time.monotonic()
     removed = []
@@ -806,11 +916,13 @@ def _auto_cleanup_buses():
             _bus_stop_state.pop(str(bus_id), None)
             _bus_last_broadcast.pop(str(bus_id), None)
             _bus_destination_ts.pop(str(bus_id), None)
+            _buses_dirty = True
         # Drop dangling destination timers.
         for bus_id in list(_bus_destination_ts.keys()):
             if bus_id not in _buses:
                 _bus_destination_ts.pop(bus_id, None)
     for bus_id, route_id, reason in removed:
+        remove_driver_presence_for_bus(bus_id)
         record_audit('bus_auto_remove', status='success', username='system', details=f'bus={bus_id} reason={reason}')
         try:
             broadcast({'type': 'bus_stop', 'bus': bus_id, 'routeId': route_id, 'reason': reason})
@@ -818,17 +930,18 @@ def _auto_cleanup_buses():
             pass
 
 def _sync_worker():
-    last = None
+    global _buses_dirty
     while True:
         time.sleep(1)
         try:
             _auto_cleanup_buses()
+            snap = None
             with _buses_lock:
-                snap = {k: dict(v) for k, v in _buses.items()}
-            snap_str = json.dumps(snap, sort_keys=True)
-            if snap_str != last:
+                if _buses_dirty:
+                    snap = {k: dict(v) for k, v in _buses.items()}
+                    _buses_dirty = False
+            if snap is not None:
                 save_json(BUSES_FILE, snap)
-                last = snap_str
         except Exception:
             pass
 
@@ -838,6 +951,11 @@ _subscribers = {}   # routeId|"all" -> [queue, ...]
 _active_admin_sessions = {}  # session_id -> {'username': str, 'last_seen': ts}
 _active_admin_lock = threading.Lock()
 ACTIVE_ADMIN_TTL_SEC = 60 * 60
+_presence_lock = threading.Lock()
+_student_presence = {}  # client_id -> last_seen epoch seconds
+_driver_presence = {}   # driver_key -> last_seen epoch seconds
+STUDENT_PRESENCE_TTL_SEC = max(20, int(os.environ.get('STUDENT_PRESENCE_TTL_SEC', '45')))
+DRIVER_PRESENCE_TTL_SEC = max(20, int(os.environ.get('DRIVER_PRESENCE_TTL_SEC', '45')))
 
 def broadcast(payload):
     try:
@@ -852,33 +970,38 @@ def broadcast(payload):
             bus_data = payload.get('data')
             if isinstance(bus_data, dict):
                 route_id = bus_data.get('routeId')
+    targets = []
     with _subscribers_lock:
         if route_id:
             # Targeted: send to "all" subscribers + matching route subscribers
             sent = set()
             for q in list(_subscribers.get('all', [])):
-                sent.add(id(q))
-                try:
-                    q.put_nowait(data)
-                except Exception:
-                    pass
+                qid = id(q)
+                if qid in sent:
+                    continue
+                sent.add(qid)
+                targets.append(q)
             for q in list(_subscribers.get(route_id, [])):
-                if id(q) not in sent:
-                    try:
-                        q.put_nowait(data)
-                    except Exception:
-                        pass
+                qid = id(q)
+                if qid in sent:
+                    continue
+                sent.add(qid)
+                targets.append(q)
         else:
-            # No route context (buses_clear, etc.) — send to all subscribers
+            # No route context (buses_clear, etc.) - send to all subscribers
             sent = set()
             for group in _subscribers.values():
                 for q in list(group):
-                    if id(q) not in sent:
-                        sent.add(id(q))
-                        try:
-                            q.put_nowait(data)
-                        except Exception:
-                            pass
+                    qid = id(q)
+                    if qid in sent:
+                        continue
+                    sent.add(qid)
+                    targets.append(q)
+    for q in targets:
+        try:
+            q.put_nowait(data)
+        except Exception:
+            pass
 
 @app.route('/events')
 def sse_events():
@@ -920,8 +1043,8 @@ def sse_events():
 # ---------- credentials helpers ----------
 def load_credentials(persist_changes=True):
     t0 = time.perf_counter()
-    default_creds = {"admins": [], "institute_name": "INSTITUTE"}
-    creds = load_json(CREDENTIALS_FILE, default_creds)
+    default_creds = copy.deepcopy(DEFAULT_CREDENTIALS_PAYLOAD)
+    creds = _get_credentials_cached_payload()
     if not isinstance(creds, dict):
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         if elapsed_ms > 120:
@@ -981,7 +1104,7 @@ def load_credentials(persist_changes=True):
 
     if changed and persist_changes:
         save_t0 = time.perf_counter()
-        save_json(CREDENTIALS_FILE, creds)
+        save_credentials(creds)
         save_elapsed_ms = (time.perf_counter() - save_t0) * 1000.0
         if save_elapsed_ms > 120:
             app.logger.warning('load_credentials save_json slow: %.1fms', save_elapsed_ms)
@@ -991,7 +1114,10 @@ def load_credentials(persist_changes=True):
     return creds
 
 def save_credentials(data):
-    save_json(CREDENTIALS_FILE, data)
+    ok = _save_json_with_status(CREDENTIALS_FILE, data)
+    if ok:
+        _update_credentials_cache(data)
+    return ok
 
 def sanitize_ui_theme(raw_theme):
     theme = raw_theme if isinstance(raw_theme, dict) else {}
@@ -1195,6 +1321,73 @@ def remove_active_admin_session():
 def get_active_admin_count():
     return _prune_active_admin_sessions()
 
+def _driver_bus_presence_key(bus_id):
+    return f'bus:{str(bus_id)}'
+
+def _normalize_presence_id(raw_value, prefix):
+    raw = str(raw_value or '').strip()
+    if not raw:
+        return None
+    safe = ''.join(ch if (ch.isalnum() or ch in ('-', '_', ':', '.')) else '_' for ch in raw)[:96]
+    if not safe:
+        return None
+    if safe.startswith(f'{prefix}:'):
+        return safe
+    return f'{prefix}:{safe}'
+
+def _prune_presence_table(table, ttl_sec, now_ts=None):
+    now = now_ts if now_ts is not None else time.time()
+    cutoff = now - max(1, int(ttl_sec))
+    stale_ids = [cid for cid, seen in table.items() if (seen or 0) < cutoff]
+    for cid in stale_ids:
+        table.pop(cid, None)
+    return len(table)
+
+def touch_student_presence(client_id):
+    cid = _normalize_presence_id(client_id, 'student')
+    if not cid:
+        return None
+    now = time.time()
+    with _presence_lock:
+        _student_presence[cid] = now
+        _prune_presence_table(_student_presence, STUDENT_PRESENCE_TTL_SEC, now)
+    return cid
+
+def remove_student_presence(client_id):
+    cid = _normalize_presence_id(client_id, 'student')
+    if not cid:
+        return
+    with _presence_lock:
+        _student_presence.pop(cid, None)
+
+def get_active_student_count():
+    with _presence_lock:
+        return _prune_presence_table(_student_presence, STUDENT_PRESENCE_TTL_SEC)
+
+def touch_driver_presence(driver_key):
+    key = _normalize_presence_id(driver_key, 'driver')
+    if not key:
+        return None
+    now = time.time()
+    with _presence_lock:
+        _driver_presence[key] = now
+        _prune_presence_table(_driver_presence, DRIVER_PRESENCE_TTL_SEC, now)
+    return key
+
+def remove_driver_presence(driver_key):
+    key = _normalize_presence_id(driver_key, 'driver')
+    if not key:
+        return
+    with _presence_lock:
+        _driver_presence.pop(key, None)
+
+def remove_driver_presence_for_bus(bus_id):
+    remove_driver_presence(_driver_bus_presence_key(bus_id))
+
+def get_active_driver_count():
+    with _presence_lock:
+        return _prune_presence_table(_driver_presence, DRIVER_PRESENCE_TTL_SEC)
+
 # ---------- auth ----------
 def login_required(fn):
     from functools import wraps
@@ -1220,21 +1413,25 @@ def health_check():
 def test_root():
     plain_root = str(os.environ.get('ROOT_PLAIN_TEXT_DEBUG', '')).strip().lower() in ('1', 'true', 'yes')
     if plain_root:
-        app.logger.info('GET / -> plain text fallback route')
+        if ROOT_TRACE_ENABLED:
+            app.logger.info('GET / -> plain text fallback route')
         return 'server running', 200
     return _render_student_view()
 
 def _render_student_view():
     trace = request.environ.get('root_trace_id') or uuid.uuid4().hex[:8]
-    app.logger.info('[student_view:%s] start', trace)
+    if ROOT_TRACE_ENABLED:
+        app.logger.info('[student_view:%s] start', trace)
     creds_t0 = time.perf_counter()
     creds = load_credentials(persist_changes=False)
     creds_ms = (time.perf_counter() - creds_t0) * 1000.0
-    app.logger.info('[student_view:%s] load_credentials done in %.1fms', trace, creds_ms)
+    if ROOT_TRACE_ENABLED:
+        app.logger.info('[student_view:%s] load_credentials done in %.1fms', trace, creds_ms)
     template_t0 = time.perf_counter()
     rendered = render_template('student.html', institute_name=creds.get('institute_name', 'INSTITUTE'))
     template_ms = (time.perf_counter() - template_t0) * 1000.0
-    app.logger.info('[student_view:%s] render_template done in %.1fms', trace, template_ms)
+    if ROOT_TRACE_ENABLED:
+        app.logger.info('[student_view:%s] render_template done in %.1fms', trace, template_ms)
     return rendered
 
 @app.route('/student')
@@ -1683,7 +1880,7 @@ def update_metrics():
 @app.route('/admin/performance', methods=['GET'])
 @login_required
 def admin_performance():
-    locs = load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+    locs = get_locations_readonly()
     creds = load_credentials()
     is_gold = current_admin_is_gold(creds)
     uptime_sec = int(time.time() - APP_START_TS)
@@ -1691,6 +1888,9 @@ def admin_performance():
         buses_count = len(_buses)
     with _subscribers_lock:
         sse_clients = sum(len(v) for v in _subscribers.values())
+    active_students = get_active_student_count()
+    # Keep compatibility with existing bus-based driver tracking while adding presence tracking.
+    active_drivers = max(get_active_driver_count(), buses_count)
     with _audit_lock:
         pruned_logs = prune_audit_logs(_audit_logs)
         if len(pruned_logs) != len(_audit_logs):
@@ -1701,6 +1901,10 @@ def admin_performance():
     cpu_stats = get_process_cpu_stats()
     storage_stats = get_storage_stats(BASE_DIR)
     disk_stats = get_process_disk_io_stats()
+    process_rss_mb = get_process_rss_mb()
+    website_used_mb = memory_stats.get('used_mb')
+    if website_used_mb is None:
+        website_used_mb = process_rss_mb
     if is_gold:
         success_events = [e for e in all_logs if e.get('event') in ('admin_login', 'admin_signup') and e.get('status') == 'success']
         failed_events = [e for e in all_logs if e.get('event') in ('admin_login', 'admin_signup') and e.get('status') != 'success']
@@ -1715,12 +1919,17 @@ def admin_performance():
         last_success_login = None
         last_failed_login = None
         recent_audit = []
+    with _metrics_lock:
+        requests_total = REQUESTS_TOTAL
+        bandwidth_in_bytes = BANDWIDTH_IN_BYTES
+        bandwidth_out_bytes = BANDWIDTH_OUT_BYTES
     uptime_for_rate = max(1, uptime_sec)
     return jsonify({
         'server_time': _utc_now_iso(),
         'uptime_sec': uptime_sec,
         'memory': {
-            'process_rss_mb': get_process_rss_mb(),
+            'process_rss_mb': process_rss_mb,
+            'website_used_mb': website_used_mb,
             'system_total_mb': memory_stats.get('total_mb'),
             'system_used_mb': memory_stats.get('used_mb'),
             'system_available_mb': memory_stats.get('available_mb'),
@@ -1736,18 +1945,18 @@ def admin_performance():
             'sample_window_sec': disk_stats.get('sample_window_sec')
         },
         'bandwidth': {
-            'in_bytes': BANDWIDTH_IN_BYTES,
-            'out_bytes': BANDWIDTH_OUT_BYTES,
-            'in_mb': round(BANDWIDTH_IN_BYTES / (1024 * 1024), 2),
-            'out_mb': round(BANDWIDTH_OUT_BYTES / (1024 * 1024), 2),
-            'avg_in_kbps': round(((BANDWIDTH_IN_BYTES * 8) / 1000) / uptime_for_rate, 2),
-            'avg_out_kbps': round(((BANDWIDTH_OUT_BYTES * 8) / 1000) / uptime_for_rate, 2)
+            'in_bytes': bandwidth_in_bytes,
+            'out_bytes': bandwidth_out_bytes,
+            'in_mb': round(bandwidth_in_bytes / (1024 * 1024), 2),
+            'out_mb': round(bandwidth_out_bytes / (1024 * 1024), 2),
+            'avg_in_kbps': round(((bandwidth_in_bytes * 8) / 1000) / uptime_for_rate, 2),
+            'avg_out_kbps': round(((bandwidth_out_bytes * 8) / 1000) / uptime_for_rate, 2)
         },
-        'requests_total': REQUESTS_TOTAL,
+        'requests_total': requests_total,
         'sse_clients': sse_clients,
         'buses_count': buses_count,
-        'active_students': sse_clients,
-        'active_drivers': buses_count,
+        'active_students': active_students,
+        'active_drivers': active_drivers,
         'active_admins': get_active_admin_count(),
         'routes_count': len(locs.get('routes', [])),
         'hostels_count': len(locs.get('hostels', [])),
@@ -1936,11 +2145,27 @@ def admin_console_activity_export():
     resp.headers['Content-Disposition'] = f'attachment; filename=\"admin-console-activity-{stamp}.{ext}\"'
     return resp
 
+@app.route('/api/presence/student', methods=['POST'])
+def update_student_presence():
+    payload = request.get_json(silent=True) or request.form.to_dict() or {}
+    client_id = payload.get('clientId') or payload.get('viewerId') or request.headers.get('X-Client-Id')
+    normalized = _normalize_presence_id(client_id, 'student')
+    if not normalized:
+        return jsonify({'error': 'clientId is required'}), 400
+    active = _to_bool(payload.get('active'), True)
+    if active:
+        touch_student_presence(normalized)
+    else:
+        remove_student_presence(normalized)
+    return jsonify({'status': 'success', 'active_students': get_active_student_count()})
+
 # ---------- bus APIs ----------
 @app.route('/api/buses', methods=['GET'])
 def get_all_buses():
     # Enrich with latest stop state for polling fallback
     with _buses_lock:
+        if not _buses:
+            return jsonify({})
         result = {}
         for bus_id, data in _buses.items():
             entry = dict(data)
@@ -1954,7 +2179,7 @@ def get_all_buses():
 
 @app.route('/api/buses/clear', methods=['POST'])
 def clear_all_buses():
-    global _buses
+    global _buses, _buses_dirty
     removed_ids = []
     with _buses_lock:
         removed_ids = list(_buses.keys())
@@ -1963,6 +2188,9 @@ def clear_all_buses():
         _bus_last_broadcast.clear()
         _bus_stop_state.clear()
         _kalman_filters.clear()
+        _buses_dirty = True
+    for bus_id in removed_ids:
+        remove_driver_presence_for_bus(bus_id)
     save_json(BUSES_FILE, {})
     try:
         broadcast({'type': 'buses_clear'})
@@ -1984,6 +2212,7 @@ _bus_last_broadcast = {}  # bus_id -> monotonic timestamp of last broadcast
 
 @app.route('/api/bus/<int:bus_number>', methods=['POST'])
 def update_bus_location(bus_number):
+    global _buses_dirty
     raw = request.get_json(silent=True) or request.form.to_dict() or {}
     try:
         raw_lat = float(raw.get('lat'))
@@ -1992,6 +2221,7 @@ def update_bus_location(bus_number):
         return jsonify({'error': 'Provide numeric lat and lng'}), 400
     # Kalman smoothing
     bus_id = str(bus_number)
+    touch_driver_presence(_driver_bus_presence_key(bus_id))
     lat, lng = kalman_smooth(bus_id, raw_lat, raw_lng)
     parsed_last_update = parse_iso_timestamp(raw.get('lastUpdate'))
     if parsed_last_update is None:
@@ -2022,6 +2252,7 @@ def update_bus_location(bus_number):
             except (TypeError, ValueError):
                 pass
         _buses[bus_id] = entry
+        _buses_dirty = True
         current_data = dict(entry)
     # Server-side stop detection — enrich broadcast payload
     stop_info = detect_stop_info(bus_id, lat, lng, route_id)
@@ -2042,15 +2273,19 @@ def update_bus_location(bus_number):
 
 @app.route('/api/bus/<int:bus_number>', methods=['DELETE'])
 def stop_bus(bus_number):
+    global _buses_dirty
     bus_id = str(bus_number)
     with _buses_lock:
         removed = _buses.pop(bus_id, None)
+        if removed:
+            _buses_dirty = True
     route_id = removed.get('routeId') if removed else None
     # Clean up Kalman + stop state
     _kalman_filters.pop(bus_id, None)
     _bus_stop_state.pop(bus_id, None)
     _bus_last_broadcast.pop(bus_id, None)
     _bus_destination_ts.pop(bus_id, None)
+    remove_driver_presence_for_bus(bus_id)
     try:
         broadcast({'type': 'bus_stop', 'bus': bus_id, 'routeId': route_id})
     except Exception:
@@ -2074,12 +2309,15 @@ def stop_bus(bus_number):
 
 @app.route('/api/bus/<int:bus_number>/route', methods=['POST'])
 def set_bus_route(bus_number):
+    global _buses_dirty
     data = request.get_json(silent=True) or {}
     route_id = data.get('routeId')
     bus_id = str(bus_number)
     with _buses_lock:
         if bus_id in _buses:
-            _buses[bus_id]['routeId'] = route_id
+            if _buses[bus_id].get('routeId') != route_id:
+                _buses[bus_id]['routeId'] = route_id
+                _buses_dirty = True
             _bus_destination_ts.pop(bus_id, None)
         # Don't create a bus entry just for route assignment
     try:
@@ -2097,21 +2335,21 @@ def get_bus_routes():
 # ---------- location APIs ----------
 @app.route('/api/locations', methods=['GET'])
 def get_locations():
-    return jsonify(load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []}))
+    return jsonify(get_locations_readonly())
 
 @app.route('/api/hostels', methods=['GET'])
 def get_hostels():
-    locs = load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+    locs = get_locations_readonly()
     return jsonify(locs.get('hostels', []))
 
 @app.route('/api/classes', methods=['GET'])
 def get_classes():
-    locs = load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+    locs = get_locations_readonly()
     return jsonify(locs.get('classes', []))
 
 @app.route('/api/routes', methods=['GET'])
 def get_routes():
-    locs = load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+    locs = get_locations_readonly()
     return jsonify(locs.get('routes', []))
 
 @app.route('/api/route-snap-settings', methods=['GET'])
@@ -2122,7 +2360,7 @@ def get_route_snap_settings_api():
 @app.route('/api/route', methods=['POST'])
 def create_route():
     data = request.json or {}
-    locs = load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+    locs = get_locations_for_update()
     waypoints = sanitize_waypoint_list(data.get('waypoints'))
     if len(waypoints) < 2:
         return jsonify({'error': 'Route requires at least 2 valid waypoints'}), 400
@@ -2170,20 +2408,20 @@ def create_route():
     else:
         routes.append(route)
     locs['routes'] = routes
-    save_json(LOCATIONS_FILE, locs)
+    save_locations(locs)
     return jsonify({'status': 'success', 'route': route})
 
 @app.route('/api/route/<route_id>', methods=['DELETE'])
 def delete_route(route_id):
-    locs = load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+    locs = get_locations_for_update()
     locs['routes'] = [r for r in locs.get('routes', []) if r['id'] != route_id]
-    save_json(LOCATIONS_FILE, locs)
+    save_locations(locs)
     return jsonify({'status': 'success'})
 
 @app.route('/api/hostel', methods=['POST'])
 def create_hostel():
     data = request.json
-    locs = load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+    locs = get_locations_for_update()
     hostel = {
         'id': f"hostel_{len(locs.get('hostels', [])) + 1}",
         'name': data['name'],
@@ -2192,20 +2430,20 @@ def create_hostel():
         'capacity': data.get('capacity', 100)
     }
     locs['hostels'].append(hostel)
-    save_json(LOCATIONS_FILE, locs)
+    save_locations(locs)
     return jsonify({'status': 'success', 'hostel': hostel})
 
 @app.route('/api/hostel/<hostel_id>', methods=['DELETE'])
 def delete_hostel(hostel_id):
-    locs = load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+    locs = get_locations_for_update()
     locs['hostels'] = [h for h in locs.get('hostels', []) if h['id'] != hostel_id]
-    save_json(LOCATIONS_FILE, locs)
+    save_locations(locs)
     return jsonify({'status': 'success'})
 
 @app.route('/api/class', methods=['POST'])
 def create_class():
     data = request.json
-    locs = load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+    locs = get_locations_for_update()
     cls = {
         'id': f"class_{len(locs.get('classes', [])) + 1}",
         'name': data['name'],
@@ -2214,14 +2452,14 @@ def create_class():
         'department': data.get('department', 'Unknown')
     }
     locs['classes'].append(cls)
-    save_json(LOCATIONS_FILE, locs)
+    save_locations(locs)
     return jsonify({'status': 'success', 'class': cls})
 
 @app.route('/api/class/<class_id>', methods=['DELETE'])
 def delete_class(class_id):
-    locs = load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+    locs = get_locations_for_update()
     locs['classes'] = [c for c in locs.get('classes', []) if c['id'] != class_id]
-    save_json(LOCATIONS_FILE, locs)
+    save_locations(locs)
     return jsonify({'status': 'success'})
 
 # ---------- health / status ----------
@@ -2231,12 +2469,22 @@ def healthz():
 
 @app.route('/status')
 def status():
-    locs = load_json(LOCATIONS_FILE, {"hostels": [], "classes": [], "routes": []})
+    locs = get_locations_readonly()
+    with _subscribers_lock:
+        sse_clients = sum(len(v) for v in _subscribers.values())
+    with _buses_lock:
+        buses_count = len(_buses)
+    with _metrics_lock:
+        requests_total = REQUESTS_TOTAL
+    active_students = get_active_student_count()
+    active_drivers = max(get_active_driver_count(), buses_count)
     return jsonify({
         'uptime_sec': int(time.time() - APP_START_TS),
-        'requests_total': REQUESTS_TOTAL,
-        'sse_clients': sum(len(v) for v in _subscribers.values()),
-        'buses_count': len(_buses),
+        'requests_total': requests_total,
+        'sse_clients': sse_clients,
+        'buses_count': buses_count,
+        'active_students': active_students,
+        'active_drivers': active_drivers,
         'routes_count': len(locs.get('routes', [])),
         'on_render': ON_RENDER,
     })

@@ -427,9 +427,23 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+function reportSimStudentPresence(clientId, active) {
+  if (!clientId) return;
+  fetch('/api/presence/student', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ clientId, active: !!active }),
+    keepalive: !active
+  }).catch(() => {});
+}
+
 function startSystemStudentSimulation(studentCount) {
   for (let i = 0; i < studentCount; i++) {
+    const clientId = `sim_student_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 8)}`;
+    systemSimStudentPresenceIds.push(clientId);
+    reportSimStudentPresence(clientId, true);
     const busInterval = setInterval(() => {
+      reportSimStudentPresence(clientId, true);
       fetch('/api/buses').catch(() => {});
       if (Math.random() < 0.15) fetch('/api/routes').catch(() => {});
       if (Math.random() < 0.05) {
@@ -446,6 +460,8 @@ function startSystemStudentSimulation(studentCount) {
 function stopSystemStudentSimulation() {
   for (const interval of systemSimStudentIntervals) clearInterval(interval);
   systemSimStudentIntervals = [];
+  for (const clientId of systemSimStudentPresenceIds) reportSimStudentPresence(clientId, false);
+  systemSimStudentPresenceIds = [];
 }
 
 // --- Student Simulation Layer ---
@@ -610,6 +626,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 // --- System Load Simulation Logic ---
 let systemSimDriverIntervals = [];
 let systemSimStudentIntervals = [];
+let systemSimStudentPresenceIds = [];
 let systemSimActiveBusNumbers = [];
 let systemSimRunning = false;
 let systemSimRoutesCache = [];

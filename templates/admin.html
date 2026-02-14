@@ -1605,7 +1605,7 @@
                     <div class="perf-v" id="perfUptime">--</div>
                 </div>
                 <div class="perf-card">
-                    <div class="perf-k">RAM (Process / System)</div>
+                    <div class="perf-k">RAM (Website / Total)</div>
                     <div class="perf-v" id="perfRam">--</div>
                 </div>
                 <div class="perf-card">
@@ -1651,7 +1651,7 @@
                 <div class="perf-card sparkline-card">
                     <div class="perf-k">RAM Used</div>
                     <canvas id="graphRamUsed" class="sparkline"></canvas>
-                    <div class="sparkline-meta"><span>System MB</span><span id="graphRamUsedVal" class="sparkline-value">--</span></div>
+                    <div class="sparkline-meta"><span>Website MB</span><span id="graphRamUsedVal" class="sparkline-value">--</span></div>
                 </div>
                 <div class="perf-card sparkline-card">
                     <div class="perf-k">Storage Used</div>
@@ -1890,7 +1890,7 @@
             graphBandwidthIn: { key: 'inKbps', title: 'Bandwidth In Rate', yAxis: 'Bandwidth (kbps)', color: '#34d399', formatValue: (v) => formatKbps(v) },
             graphBandwidthOut: { key: 'outKbps', title: 'Bandwidth Out Rate', yAxis: 'Bandwidth (kbps)', color: '#60a5fa', formatValue: (v) => formatKbps(v) },
             graphLagMs: { key: 'lagMs', title: 'API Lag', yAxis: 'Latency (ms)', color: '#f59e0b', formatValue: (v) => `${v.toFixed(1)} ms` },
-            graphRamUsed: { key: 'ramUsedMb', title: 'RAM Used', yAxis: 'RAM (MB)', color: '#f97316', formatValue: (v) => `${v.toFixed(1)} MB` },
+            graphRamUsed: { key: 'ramUsedMb', title: 'Website RAM Used', yAxis: 'RAM (MB)', color: '#f97316', formatValue: (v) => `${v.toFixed(1)} MB` },
             graphStorageUsed: { key: 'storageUsedPct', title: 'Storage Used', yAxis: 'Storage (%)', color: '#c084fc', formatValue: (v) => `${v.toFixed(1)}%` },
             graphDiskRead: { key: 'diskReadKbps', title: 'Disk Read Speed', yAxis: 'Read speed (kbps)', color: '#22d3ee', formatValue: (v) => formatKbps(v) },
             graphDiskWrite: { key: 'diskWriteKbps', title: 'Disk Write Speed', yAxis: 'Write speed (kbps)', color: '#f472b6', formatValue: (v) => formatKbps(v) }
@@ -2301,7 +2301,9 @@
             pushPerfGraphSample('lagMs', lagMs, sampleTs);
 
             const memory = (data && data.memory) || {};
-            const ramUsed = (memory.system_used_mb != null) ? Number(memory.system_used_mb) : Number(memory.process_rss_mb);
+            const ramUsed = (memory.website_used_mb != null)
+                ? Number(memory.website_used_mb)
+                : ((memory.system_used_mb != null) ? Number(memory.system_used_mb) : Number(memory.process_rss_mb));
             pushPerfGraphSample('ramUsedMb', ramUsed, sampleTs);
 
             const storage = (data && data.storage) || {};
@@ -2387,11 +2389,18 @@
                 const reqEnd = (window.performance && typeof performance.now === 'function') ? performance.now() : Date.now();
                 const lagMs = Math.max(0, reqEnd - reqStart);
                 setText('perfUptime', formatUptime(data.uptime_sec));
-                const processRam = data.memory && data.memory.process_rss_mb != null ? `${data.memory.process_rss_mb} MB` : '--';
-                const systemRam = data.memory && data.memory.system_total_mb != null ? `${data.memory.system_total_mb} MB` : '--';
-                const systemRamUsed = data.memory && data.memory.system_used_mb != null ? `${data.memory.system_used_mb} MB` : null;
+                const websiteRamUsed = data.memory && data.memory.website_used_mb != null ? `${data.memory.website_used_mb} MB` : null;
+                const systemRam = data.memory && data.memory.system_total_mb != null ? `${data.memory.system_total_mb} MB` : null;
                 const memorySource = (data.memory && data.memory.source) ? ` (${data.memory.source})` : '';
-                setText('perfRam', (systemRamUsed ? `${processRam} / ${systemRamUsed} of ${systemRam}` : `${processRam} / ${systemRam}`) + memorySource);
+                if (websiteRamUsed && systemRam) {
+                    setText('perfRam', `${websiteRamUsed} / ${systemRam}${memorySource}`);
+                } else if (websiteRamUsed) {
+                    setText('perfRam', `${websiteRamUsed}${memorySource}`);
+                } else if (systemRam) {
+                    setText('perfRam', `${systemRam}${memorySource}`);
+                } else {
+                    setText('perfRam', `--${memorySource}`);
+                }
                 const cpuPercent = data.cpu && data.cpu.process_percent != null ? formatPercent(data.cpu.process_percent) : '--';
                 const cpuCores = data.cpu && data.cpu.cores != null ? ` (${data.cpu.cores} cores)` : '';
                 setText('perfCpu', `${cpuPercent}${cpuCores}`);
