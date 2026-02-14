@@ -771,7 +771,10 @@
         cursor-info { font-size:11px; color:#667eea; text-align:center; margin-top:8px; display:block }
     </style>
 </head>
-<body class="{% if is_gold_admin %}gold-admin{% endif %}">
+<body
+    class="{% if is_gold_admin %}gold-admin{% endif %}"
+    data-current-admin="{{ (admin_user or '') | e }}"
+    data-can-access-secure-admin="{% if is_gold_admin %}1{% else %}0{% endif %}">
     <div class="panel">
         <div class="topbar">
             <div>
@@ -875,8 +878,15 @@
             <button onclick="hideUsersSection()" style="margin-top:12px;background:#ff7b8a;color:#fff;padding:8px 16px;border-radius:8px;border:none;cursor:pointer">Close</button>
         </div>
         <script>
-        const CURRENT_ADMIN = {{ (admin_user or '') | tojson }};
-        const CAN_ACCESS_SECURE_ADMIN = {{ (is_gold_admin or false) | tojson }};
+        const _adminBootstrapEl = document.body;
+        const CURRENT_ADMIN = (_adminBootstrapEl && _adminBootstrapEl.dataset && typeof _adminBootstrapEl.dataset.currentAdmin === 'string')
+            ? _adminBootstrapEl.dataset.currentAdmin
+            : '';
+        const CAN_ACCESS_SECURE_ADMIN = !!(
+            _adminBootstrapEl &&
+            _adminBootstrapEl.dataset &&
+            _adminBootstrapEl.dataset.canAccessSecureAdmin === '1'
+        );
         const adminPasswordCache = {};
 
         function escapeHtml(v) {
